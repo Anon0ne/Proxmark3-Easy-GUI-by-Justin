@@ -1,0 +1,6 @@
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+Proxmark3Suite/client-help.txt text eol=lf whitespace=-trailing-space
