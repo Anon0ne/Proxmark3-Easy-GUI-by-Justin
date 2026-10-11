@@ -1,6 +1,8 @@
-# Proxmark3 Easy GUI - by Justin · 0.1b
+# Proxmark3 Easy GUI - by Justin · 0.3b
 
-First public beta release of the Windows Engineering Suite workbench, built from the v0.1.0 scaffold. MarauderGUI was a visual reference only; no Marauder command/backend code is used or distributed with this repository.
+Windows beta of the Engineering Suite workbench, built from the v0.1.0 scaffold. MarauderGUI was a visual reference only; no Marauder command/backend code is used or distributed with this repository.
+
+Version 0.3b opens on Cards. Identify a card, approve its information checks, then review a separate Auto Recovery confirmation. One Next recommended step button follows this flow. Saved cards retain compact facts; raw output is available in Console and optional card activity details. Connection configuration is in Settings; hardware verification is in Hardware & compatibility. See [workflow research and test-card plan](AUTO_RECOVERY.md). No successful physical recovery or card write has been verified.
 
 ## Launch
 
@@ -53,3 +55,5 @@ Upstream references:
 ```
 
 Hardware probes are opt-in and read-only. `client-help.txt` is the local client's captured metadata fixture; `hardware-verification.txt` records real read-only device access. See `VERIFICATION.md` for what was actually checked and outstanding limitations.
+
+Detected HF cards with a UID are stored locally in cards.json in the application's data directory. The Card identification tab has About current card and Saved cards views. Classic cards offer hf 14a reader and hf mf info before a separate Auto Recovery confirmation. These read-only checks collect what the installed client can report; unknown keys or weak coupling can limit information. Observations can include sensitive keys. UID identifies a history entry, not a globally unique physical card (FNUID/magic cards can share one).

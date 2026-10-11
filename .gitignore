@@ -19,3 +19,12 @@ Proxmark3Suite/hardware-verification.txt
 *.sha256
 *.log
 *.disabled
+
+# Private local card backups and one-off probes
+Proxmark3Suite/lab-*.bin
+Proxmark3Suite/lab-*.json
+Proxmark3Suite/*_lab_card.py
+Proxmark3Suite/verify_lab_backup.py
+Proxmark3Suite/build-ui.log
+Proxmark3Suite/dist-*/
+Proxmark3Suite/*-smoke/

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication,QMessageBox,QTreeWidgetItem
 from app import Window,TARGET
 from app import saved_list
 from firmware import build_script,digest
+from recovery import ClassicCard,detect_classic,card_uid,recovery_command,card_summary
 
 ROOT = Path(__file__).resolve().parents[1]
 app = QApplication.instance() or QApplication([])
@@ -72,6 +73,19 @@ class CatalogTests(unittest.TestCase):
         if Path(r'C:\rrg_other\pm3.bat').exists():
             self.assertEqual(resolve_client(r'C:\rrg_other\pm3.bat'),r'C:\rrg_other\client\proxmark3.exe')
 
+    def test_classic_detection_and_ambiguous_families(self):
+        text = '[+] UID: 12 34 56 78\n[+] MIFARE Classic 1K\n[+] Valid ISO 14443-A tag found'
+        self.assertEqual(detect_classic(text),ClassicCard('12345678','1k'))
+        for suffix in ['\nMIFARE Plus','\nMIFARE Classic 4K','\nNTAG213','\nNo known/supported tags found','\nUID: AA BB CC DD']:
+            self.assertIsNone(detect_classic(text+suffix))
+        self.assertIsNone(detect_classic('MIFARE Classic 1K'))
+        self.assertEqual(detect_classic('UID: 12 34 56 78\nMIFARE Mini 0.3K\n'),ClassicCard('12345678','mini'))
+
+    def test_recovery_uses_only_documented_flags(self):
+        self.assertEqual(recovery_command(ClassicCard('12345678','1k'),self.catalog),'hf mf autopwn --1k --file mfc_default_keys')
+        with self.assertRaises(ValueError): recovery_command(ClassicCard('12345678','8k'),self.catalog)
+        with self.assertRaises(ValueError): recovery_command(ClassicCard('12345678','1k'),{})
+
 class UiTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=ROOT)
@@ -123,5 +137,80 @@ class UiTests(unittest.TestCase):
     def test_no_card_is_a_normal_search_result(self):
         self.window.result('hf search','[!] No known/supported 13.56 MHz tags found')
         self.assertEqual(self.window.statusBar().currentMessage(),'Search completed: no supported card detected.')
+
+    def prepare_recovery(self):
+        self.window.session_path = self.window.launcher.text(); self.window.session_port = self.window.port.currentText(); self.window.session_offline = False
+        self.window.compatible = True; self.window.session.ready = True
+        self.window.recovery_card = ClassicCard('12345678','1k')
+        self.window.info_verified_uid = '12345678'
+
+    def test_recovery_decline_does_not_send(self):
+        self.prepare_recovery()
+        with patch.object(QMessageBox,'question',return_value=QMessageBox.No),patch.object(self.window.session,'send') as send:
+            self.window.review_recovery(); send.assert_not_called()
+        self.assertIsNone(self.window.pending_recovery)
+
+    def test_recovery_verifies_uid_then_runs_without_second_prompt(self):
+        self.prepare_recovery()
+        with patch.object(QMessageBox,'question',return_value=QMessageBox.Yes) as confirm,patch.object(self.window.session,'send') as send:
+            self.window.review_recovery(); send.assert_called_once_with('hf 14a reader')
+            self.window.result('hf 14a reader','[+] UID: 12 34 56 78\n')
+            self.assertEqual(send.call_args.args,('hf mf autopwn --1k --file mfc_default_keys',))
+            self.assertEqual(confirm.call_count,1)
+            self.assertTrue(self.window.recovery_running)
+            self.assertEqual(self.window.session.command_timeout_ms,1800000)
+            self.window.result('hf mf autopwn --1k --file mfc_default_keys','No keys found')
+            self.assertFalse(self.window.recovery_running)
+            self.assertEqual(self.window.timeout.currentIndex(),0)
+
+    def test_recovery_cancels_when_card_changes(self):
+        self.prepare_recovery()
+        with patch.object(QMessageBox,'question',return_value=QMessageBox.Yes),patch.object(self.window.session,'send') as send:
+            self.window.review_recovery(); self.window.result('hf 14a reader','UID: AA BB CC DD\n')
+            send.assert_called_once_with('hf 14a reader')
+        self.assertIsNone(self.window.pending_recovery)
+
+    def test_repeated_detected_card_prompts_once(self):
+        self.prepare_recovery()
+        text = '[+] UID: 12 34 56 78\n[+] MIFARE Classic 1K\n'
+        with patch.object(self.window,'review_information') as offer:
+            self.window.result('hf search',text); app.processEvents()
+            self.window.result('hf search',text); app.processEvents()
+            self.assertEqual(offer.call_count,1)
+
+    def test_information_checks_save_card_before_recovery(self):
+        self.prepare_recovery(); self.window.info_verified_uid = None
+        with patch.object(QMessageBox,'question',return_value=QMessageBox.Yes),patch.object(self.window.session,'send') as send,patch.object(self.window,'review_recovery') as recover:
+            self.window.review_information()
+            send.assert_called_once_with('hf 14a reader')
+            self.window.result('hf 14a reader','UID: 12 34 56 78\n')
+            self.assertEqual(send.call_args.args,('hf mf info',))
+            self.window.result('hf mf info','UID: 12 34 56 78\nMagic capabilities... Gen 1a\n')
+            app.processEvents()
+            recover.assert_called_once()
+        self.assertEqual(self.window.info_verified_uid,'12345678')
+        self.assertTrue((self.window.data_dir/'cards.json').exists())
+        self.assertIn('Gen 1a',self.window.current_card.toPlainText())
+
+    def test_information_checks_cancel_changed_card(self):
+        self.prepare_recovery(); self.window.info_verified_uid = None
+        with patch.object(QMessageBox,'question',return_value=QMessageBox.Yes),patch.object(self.window.session,'send') as send:
+            self.window.review_information()
+            self.window.result('hf 14a reader','UID: AA BB CC DD\n')
+            send.assert_called_once_with('hf 14a reader')
+        self.assertIsNone(self.window.pending_info)
+        self.assertIsNone(self.window.info_verified_uid)
+
+    def test_search_uid_annotation_is_detected(self):
+        text = 'UID: 1F 1D AB 41   ( FNUID, fixed, non-unique ID )\nMIFARE Classic 1K\n'
+        self.assertEqual(detect_classic(text),ClassicCard('1F1DAB41','1k'))
+
+    def test_card_summary_keeps_facts_without_console_noise(self):
+        text = '[=] Searching for Topaz tag...\n[+] UID: 1F 1D AB 41\n[+] ATQA: 00 04\n[+] SAK: 08 [2]\n[+] MIFARE Classic 1K\n[+] Magic capabilities... Gen 1a\n[#] Static nonce....... 01200145\n[+] Static nonce... yes\n[+] Sector 1 key A... A0A1A2A3A4A5\n[+] Fudan based card\n[?] Hint: Try hf mf info\n[usb|script] pm3 --> rem SUITE_abc\n'
+        summary = card_summary('1F1DAB41',{'hf search':text,'hf mf info':text})
+        for fact in ['UID: 1F1DAB41','ATQA: 00 04','SAK: 08','Gen 1a','Nonce value: 01200145','Static nonce: yes','Sector 1 key A: A0A1A2A3A4A5','Fingerprint: Fudan based card']:
+            self.assertIn(fact,summary)
+        for noise in ['Searching','Hint:','SUITE_','[+]','[usb']: self.assertNotIn(noise,summary)
+        self.assertEqual(summary.count('Magic capabilities:'),1)
 
 if __name__ == '__main__': unittest.main()

@@ -5,7 +5,7 @@ import re
 ANSI = re.compile(r'\x1b\[[0-?]*[ -/]*[@-~]')
 
 def clean(text):
-    return ANSI.sub('', text).replace('\r', '')
+    return re.sub(r'\r+(?:\n)?', '\n', ANSI.sub('', text))
 
 @dataclass
 class Option:
@@ -51,7 +51,7 @@ def parse_dump(text):
         raise ValueError('No firmware command metadata recognized in client dump')
     return commands
 
-READ_ONLY = {'hw version', 'hw status', 'hw ping', 'hf search', 'lf search'}
+READ_ONLY = {'hw version', 'hw status', 'hw ping', 'hf search', 'lf search', 'hf 14a reader', 'hf mf info'}
 
 def validate_line(line):
     # Current upstream pipe reader has a 256-byte line buffer. Reject truncation

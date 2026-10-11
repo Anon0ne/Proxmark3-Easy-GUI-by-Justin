@@ -10,12 +10,52 @@ from PySide6.QtCore import Qt, QProcess, QTimer, QSettings, QStandardPaths
 from PySide6.QtGui import QFont, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,
     QTreeWidget,QTreeWidgetItem,QLineEdit,QPushButton,QPlainTextEdit,QLabel,QComboBox,
-    QFormLayout,QSplitter,QMessageBox,QFileDialog,QCheckBox,QTabWidget,QScrollArea,QHeaderView)
+    QFormLayout,QSplitter,QMessageBox,QFileDialog,QCheckBox,QTabWidget,QScrollArea,QHeaderView,QDialog,QTextBrowser)
+from eventlog import EventLogFormatter
 from catalog import parse_dump, build_command, needs_confirmation, clean
 from backend import Session, resolve_client, client_environment, start_external
+from recovery import detect_classic,card_uid,recovery_command,card_summary
 
-VERSION = '0.1b'
+VERSION = '0.3b'
 TARGET = 'v4.21611-636-gda509461b'
+HELP_TOPICS = {
+    'Getting started': '''# Getting started
+Connect the Proxmark3 Easy, select its COM port, and choose the installed pm3.bat launcher.
+Click **Refresh command catalog**, **Connect**, then **Verify hardware**. Review compatibility before running commands.
+
+Use the searchable command tree to find a command. Its argument form and exact help come from your installed client.
+Review the command preview before execution. Favorites and command history make repeated tasks easier.
+''',
+    'Card positioning and identification': '''# Card positioning and identification
+Place one HF card over the HF antenna. Use **Identify LF + HF** in the Cards tab.
+If identification works but a subsequent operation reports no tag, keep the card still and try a small change in distance or position.
+Remove other cards and metal near the antenna. Repeated read failures should be resolved before writing.
+
+Automatic identification runs while idle. Recovery requires a separate confirmation and pauses automatic scanning.
+''',
+    'Auto Recovery and lab cards': '''# Auto Recovery
+For a clearly identified MIFARE Classic card, the suite can offer the installed client's **hf mf autopwn** workflow.
+It checks the UID again before starting. Recovery may fail or find only some keys; command completion alone does not prove success.
+Inspect the recovered key table and saved dump. Files may contain sensitive card data.
+
+Use your own disposable lab cards. Save and verify a full backup before modifying keys or data.
+Changing a UID alone does not test key recovery. A key present in the default dictionary tests dictionary lookup.
+Card writes require explicit confirmation. Sector trailer changes affect access and must preserve valid access bits.
+
+[RRG workflow documentation](https://github.com/RfidResearchGroup/proxmark3/blob/master/doc/cheatsheet.md)
+''',
+    'Troubleshooting and logs': '''# Troubleshooting
+**Invalid serial port:** check the COM port, USB connection, and whether another client already owns the device.
+
+**No tag / communication error:** reposition the card and repeat identification. This is not a successful recovery.
+
+**Firmware mismatch:** verify hardware and use a matching client and firmware. Review the Firmware tab before updating.
+
+The live console displays terminal redraws as separate lines and hides internal transaction markers.
+Use the console export control to save displayed output. Session logs rotate automatically.
+Exact firmware help remains available in the command workbench.
+''',
+}
 STYLE = '''
 QWidget {background:#0f141a;color:#e8edf2;font-family:"Segoe UI";font-size:12pt;}
 QLabel#title {font-size:22pt;font-weight:600;} QLabel#muted {color:#aab8c7;}
@@ -47,7 +87,7 @@ class Window(QMainWindow):
     def __init__(self, data_dir=None, settings=None, auto_discover=True):
         super().__init__()
         self.setWindowTitle(f'Proxmark3 Engineering Suite {VERSION}')
-        self.resize(1440, 940)
+        self.resize(1280, 850)
         self.settings = settings or QSettings('Anon0ne', 'Proxmark3EngineeringSuite')
         self.data_dir = Path(data_dir or QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation))
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -61,12 +101,30 @@ class Window(QMainWindow):
         self.current = self.device_version = self.client_version = ''
         self.compatible = self.catalog_verified = False
         self.discovery_generation = 0
+        self.recovery_card = None
+        self.pending_recovery = None
+        self.approved_recovery = None
+        self.recovery_running = False
+        self.recovery_timeout_index = None
+        self.last_recovery_offer = None
+        self.pending_info = None
+        self.info_verified_uid = None
+        self.current_uid = None
+        try:
+            self.card_records = json.loads((self.data_dir/'cards.json').read_text(encoding='utf-8'))
+            if not isinstance(self.card_records,dict): self.card_records = {}
+            self.card_records = {uid:record for uid,record in self.card_records.items() if isinstance(record,dict) and isinstance(record.get('observations'),dict) and all(isinstance(k,str) and isinstance(v,str) for k,v in record['observations'].items())}
+        except (OSError,ValueError): self.card_records = {}
         self.expected = self.settings.value('expected',TARGET)
         self.runtime_bin = self.settings.value('runtime_bin','')
         self.device_status = ''
         self.favorites = set(saved_list(self.settings,'favorites'))
         self.history_items = saved_list(self.settings,'history')[:50]
         self.session = Session(self)
+        self.event_formatter = EventLogFormatter()
+        help_menu = self.menuBar().addMenu('&Help')
+        for topic in HELP_TOPICS:
+            help_menu.addAction(topic, lambda checked=False, name=topic: self.show_guide(name))
         self.session.output.connect(self.console_text)
         self.session.state.connect(self.session_state)
         self.session.failed.connect(self.failure)
@@ -86,12 +144,17 @@ class Window(QMainWindow):
         self.launcher.setAccessibleName('Client launcher path')
         self.port = QComboBox(); self.port.setEditable(True); self.port.addItem(self.settings.value('port','COM18'))
         self.offline = QCheckBox('Offline tools')
-        layout.addLayout(row(QLabel('Client'),self.launcher,self.button('Browse…',self.browse),QLabel('Port'),self.port,self.offline))
+        setup = QWidget(); setup_layout = QVBoxLayout(setup)
+        setup_layout.addWidget(QLabel('Connection settings and command catalog'))
+        setup_layout.addLayout(row(QLabel('Client'),self.launcher,self.button('Browse…',self.browse)))
+        setup_layout.addLayout(row(QLabel('Port'),self.port,self.offline))
         self.connect_button = self.button('Connect',self.connect_client,primary=True)
         self.discover_button = self.button('Refresh command catalog',self.discover)
         self.timeout = QComboBox(); self.timeout.addItems(['3 minutes','10 minutes','30 minutes']); self.timeout.setToolTip('Client command timeout. Long recovery operations may need more time.')
         self.timeout.currentIndexChanged.connect(lambda index: setattr(self.session,'command_timeout_ms',[180000,600000,1800000][index]))
-        layout.addLayout(row(self.connect_button,self.button('Disconnect / Stop',self.stop,danger=True),self.discover_button,self.button('Verify hardware',self.diagnostics),self.timeout))
+        layout.addLayout(row(self.connect_button,self.button('Disconnect / Stop',self.stop,danger=True)))
+        setup_layout.addLayout(row(self.discover_button,QLabel('Command timeout'),self.timeout))
+        setup_layout.addStretch()
         self.tabs = QTabWidget(); layout.addWidget(self.tabs,1)
         workbench = QSplitter(); self.tabs.addTab(workbench,'Command workbench')
         left = QWidget(); lv = QVBoxLayout(left)
@@ -117,21 +180,39 @@ class Window(QMainWindow):
         self.help = QPlainTextEdit(); self.help.setReadOnly(True); self.help.setMinimumHeight(110); self.help.setPlaceholderText('Exact installed-client usage, options and examples.'); rv.addWidget(self.help,2)
         workbench.addWidget(right); workbench.setSizes([440,920])
         cards = QWidget(); cv = QVBoxLayout(cards)
-        intro = QLabel('Present a card to identify its technology. Only “lf search” and “hf search” run automatically.\nIdentification does not imply successful decryption; keys and card technology determine what is possible.'); intro.setWordWrap(True); cv.addWidget(intro)
+        intro = QLabel('1. Identify a card    →    2. Collect information    →    3. Review recovery'); intro.setWordWrap(True); cv.addWidget(intro)
         self.auto_detect = QCheckBox('Search automatically every 6 seconds while idle'); self.auto_detect.toggled.connect(self.toggle_auto)
         cv.addLayout(row(self.button('Identify LF + HF',self.identify,primary=True),self.auto_detect))
-        self.card_output = QPlainTextEdit(); self.card_output.setReadOnly(True); self.card_output.setMaximumBlockCount(3000); cv.addWidget(self.card_output)
-        self.tabs.addTab(cards,'Card identification')
+        self.current_card = QPlainTextEdit(); self.current_card.setReadOnly(True); self.current_card.setMaximumHeight(180)
+        self.current_card.setPlaceholderText('About current card — detected identity and recommended checks appear here.')
+        cv.addWidget(QLabel('ABOUT CURRENT CARD'))
+        cv.addWidget(self.current_card)
+        cv.addLayout(row(self.button('Saved cards…',self.show_saved_cards)))
+        self.offer_auto_recovery = QCheckBox('Offer recommended checks when a MIFARE Classic card is detected')
+        self.offer_auto_recovery.setChecked(True)
+        self.recovery_status = QLabel('Auto Recovery: waiting for a supported card. Success is not guaranteed.')
+        self.recovery_status.setWordWrap(True)
+        self.recovery_button = self.button('Next recommended step',self.review_recovery,primary=True)
+        cv.addWidget(self.offer_auto_recovery); cv.addLayout(row(self.recovery_status,self.recovery_button))
+        details = QCheckBox('Show card activity details')
+        self.card_output = QPlainTextEdit(); self.card_output.setReadOnly(True); self.card_output.setMaximumBlockCount(3000)
+        self.card_output.hide(); details.toggled.connect(self.card_output.setVisible)
+        cv.addWidget(details); cv.addWidget(self.card_output); cv.addStretch()
+        self.tabs.insertTab(0,cards,'Cards'); self.tabs.setCurrentWidget(cards)
         hardware = QWidget(); hv = QVBoxLayout(hardware)
         self.target_label = QLabel('Target: Iceman/RRG '+self.expected+' · PM3 GENERIC / Easy'); hv.addWidget(self.target_label)
         note = QLabel('Card workflows require matching client/device revisions and a verified generic board.'); note.setWordWrap(True); hv.addWidget(note)
+        hv.addWidget(self.button('Verify hardware',self.diagnostics,primary=True))
         self.hardware_output = QPlainTextEdit(); self.hardware_output.setReadOnly(True); hv.addWidget(self.hardware_output)
         self.tabs.addTab(hardware,'Hardware & compatibility')
         from firmware import FirmwarePanel
         self.firmware = FirmwarePanel(self); self.tabs.addTab(self.firmware,'Firmware updates')
         self.history = QComboBox(); self.history.setEditable(True); self.history.addItems(self.history_items); self.history.setCurrentText(''); self.history.setMinimumWidth(300)
-        layout.addLayout(row(QLabel('LIVE CONSOLE'),self.history,self.button('Send',self.send_console),self.button('Export log…',self.export),self.button('Clear view',lambda: self.console.clear())))
-        self.console = QPlainTextEdit(); self.console.setReadOnly(True); self.console.setMaximumBlockCount(5000); self.console.setFont(QFont('Consolas',11)); self.console.setMaximumHeight(135); layout.addWidget(self.console)
+        console_page = QWidget(); console_layout = QVBoxLayout(console_page)
+        console_layout.addLayout(row(self.history,self.button('Send',self.send_console),self.button('Export log…',self.export),self.button('Clear view',lambda: self.console.clear())))
+        self.console = QPlainTextEdit(); self.console.setReadOnly(True); self.console.setMaximumBlockCount(5000); self.console.setFont(QFont('Consolas',11)); console_layout.addWidget(self.console)
+        self.tabs.addTab(console_page,'Console')
+        self.tabs.addTab(setup,'Settings')
         self.setStyleSheet(STYLE)
         QShortcut(QKeySequence('Ctrl+K'),self,activated=self.search.setFocus)
         QShortcut(QKeySequence('Ctrl+Return'),self,activated=self.execute)
@@ -159,10 +240,25 @@ class Window(QMainWindow):
         self.catalog_verified = False; self.invalidate_device()
 
     def console_text(self,text):
-        self.console.moveCursor(QTextCursor.End); self.console.insertPlainText(clean(text))
-        self.logger.info(clean(text).rstrip())
+        formatted = self.event_formatter.feed(text)
+        self.console.moveCursor(QTextCursor.End); self.console.insertPlainText(formatted)
+        if formatted: self.logger.info(formatted.rstrip())
+
+    def show_guide(self, topic):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(topic)
+        dialog.resize(760,560)
+        layout = QVBoxLayout(dialog)
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(True)
+        browser.setMarkdown(HELP_TOPICS[topic])
+        layout.addWidget(browser)
+        layout.addWidget(self.button('Close',dialog.accept))
+        dialog.exec()
 
     def failure(self,message):
+        self.pending_info = None; self.info_verified_uid = None
+        self.finish_recovery('Auto Recovery stopped: '+message)
         self.queue.clear(); self.compatible = False; self.poll.stop(); self.auto_detect.setChecked(False)
         self.console_text('\n[ERROR] '+message+'\n'); self.statusBar().showMessage(message); self.update_controls()
 
@@ -254,7 +350,9 @@ class Window(QMainWindow):
     def connect_client(self):
         try:
             if self.firmware.busy: raise ValueError('Wait for the firmware operation to finish.')
+            if self.pending_info and not internal: raise ValueError('Wait for the card information checks to finish.')
             exe = resolve_client(self.launcher.text()); self.compatible = False; self.device_version = ''; self.queue.clear()
+            self.recovery_card = None; self.last_recovery_offer = None
             self.session_path = self.launcher.text(); self.session_port = self.port.currentText(); self.session_offline = self.offline.isChecked()
             self.session.start(exe,self.session_port,self.data_dir,self.session_offline,self.runtime_bin)
             if not self.session_offline: self.queue = ['hw version','hw status']
@@ -264,6 +362,10 @@ class Window(QMainWindow):
     def session_state(self,state):
         self.badge.setText('●  '+state.upper())
         if state == 'Disconnected': self.compatible = False; self.poll.stop(); self.auto_detect.setChecked(False)
+        if state == 'Disconnected':
+            self.pending_info = None; self.info_verified_uid = None
+            self.finish_recovery('Auto Recovery stopped: client disconnected.')
+            self.recovery_card = None; self.last_recovery_offer = None
         self.update_controls()
         if state == 'Ready': QTimer.singleShot(0,self.next_command)
 
@@ -273,6 +375,7 @@ class Window(QMainWindow):
         self.connect_button.setEnabled(self.session.process.state() == QProcess.NotRunning)
         # Keep the running toggle operable while the client is busy.
         self.auto_detect.setEnabled(self.compatible)
+        self.recovery_button.setEnabled(ready and self.compatible and self.recovery_card is not None and not self.recovery_running and self.pending_recovery is None)
         self.compat.setText('Compatibility: MATCHED · PM3 GENERIC' if self.compatible else 'Compatibility: UNVERIFIED / MISMATCH · card workflows locked')
 
     def diagnostics(self):
@@ -294,7 +397,9 @@ class Window(QMainWindow):
             if not name or not self.catalog_verified: raise ValueError('Command is not in the verified installed-client catalog.')
             if not self.commands[name].offline and not self.compatible and line not in {'hw version','hw status','hw ping'}:
                 raise ValueError('Verify matching firmware and PM3 GENERIC hardware before device commands.')
-            if confirm:
+            approved = line == self.approved_recovery and line.startswith('hf mf autopwn ')
+            self.approved_recovery = None
+            if confirm and not approved:
                 answer = QMessageBox.question(self,'Confirm command','Review the exact command:\n\n'+line+'\n\nThis command has not been classified as read-only. It may modify a card, device, or files. Execute on your authorized target?',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
                 if answer != QMessageBox.Yes: return
             self.session.send(line); self.console_text('\n> '+line+'\n')
@@ -311,11 +416,11 @@ class Window(QMainWindow):
 
     def result(self,command,text):
         if command.startswith('hw '):
-            self.hardware_output.appendPlainText('\n> '+command+'\n'+text)
+            self.hardware_output.appendPlainText('\n> '+command+'\n'+EventLogFormatter().feed(text+'\n'))
             if command == 'hw version': self.device_version = text
             if command == 'hw status': self.device_status = text
             self.check_compatibility()
-        if command in {'lf search','hf search'}: self.card_output.appendPlainText(datetime.now().strftime('%H:%M:%S')+'  '+command+'\n'+text)
+        if command in {'lf search','hf search'}: self.card_output.appendPlainText(datetime.now().strftime('%H:%M:%S')+'  '+command+'\n'+EventLogFormatter().feed(text+'\n'))
         no_card = command in {'lf search','hf search'} and re.search(r"No known/supported|Couldn't identify a chipset",text,re.I)
         if no_card:
             self.statusBar().showMessage('Search completed: no supported card detected.')
@@ -323,6 +428,117 @@ class Window(QMainWindow):
             self.statusBar().showMessage('Client reported an error; review console output.')
             if re.search(r'not connected|device disconnected',text,re.I): self.compatible = False; self.queue.clear(); self.poll.stop()
         self.update_controls()
+        if command in {'hf search','auto','hf 14a reader','hf mf info'}:
+            self.record_card(command,text)
+        if command in {'hf search','auto'}:
+            self.recovery_card = detect_classic(text)
+            if self.recovery_card:
+                self.recovery_status.setText('MIFARE Classic '+self.recovery_card.size.upper()+' · UID '+self.recovery_card.uid+' · review recommended information checks')
+                if self.offer_auto_recovery.isChecked() and self.recovery_card != self.last_recovery_offer:
+                    self.last_recovery_offer = self.recovery_card
+                    QTimer.singleShot(0,self.review_information)
+            else:
+                self.info_verified_uid = None
+                self.last_recovery_offer = None
+                self.recovery_status.setText('No unambiguous MIFARE Classic card identified. Other technologies require their own documented workflow.')
+            self.update_controls()
+        if command == 'hf 14a reader' and self.pending_info:
+            if card_uid(text) != self.pending_info.uid:
+                self.pending_info = None
+                self.recovery_status.setText('Information checks canceled: card missing or UID changed.')
+            else:
+                self.dispatch('hf mf info',internal=True)
+            return
+        if command == 'hf mf info' and self.pending_info:
+            card = self.pending_info; self.pending_info = None
+            if card_uid(text) != card.uid or re.search(r'no tag|auth error|can.t select|failed|communication error',text,re.I):
+                self.recovery_status.setText('Information checks incomplete. Reposition the card and retry before recovery.')
+                return
+            self.info_verified_uid = card.uid
+            self.recovery_status.setText('Information checks saved. Review current card details before Auto Recovery.')
+            QTimer.singleShot(0,self.review_recovery)
+            return
+        if command == 'hf 14a reader' and self.pending_recovery:
+            card,line = self.pending_recovery
+            if card_uid(text) != card.uid:
+                self.finish_recovery('Auto Recovery canceled: card missing, ambiguous, or UID changed. Identify it again.')
+                return
+            self.pending_recovery = None
+            self.approved_recovery = line
+            self.recovery_running = True
+            self.recovery_timeout_index = self.timeout.currentIndex()
+            self.timeout.setCurrentIndex(2)
+            self.recovery_status.setText('Auto Recovery running · 30-minute timeout · keep the same card on the antenna')
+            self.dispatch(line)
+        elif command.startswith('hf mf autopwn') and self.recovery_running:
+            self.card_output.appendPlainText('\nAUTO RECOVERY RESULT\n'+EventLogFormatter().feed(text+'\n'))
+            self.finish_recovery('Auto Recovery finished. Review the client output for recovered keys, partial results and saved dumps; completion alone is not proof of success.')
+
+    def review_recovery(self):
+        if not self.session.ready or self.queue or not self.compatible or not self.catalog_verified or self.pending_recovery or self.recovery_running: return
+        card = self.recovery_card
+        if not card: return
+        if self.info_verified_uid != card.uid:
+            self.review_information(); return
+        try: line = recovery_command(card,self.commands)
+        except ValueError as error:
+            self.recovery_status.setText(str(error)); return
+        resume_scan = self.auto_detect.isChecked()
+        self.poll.stop(); self.auto_detect.setChecked(False)
+        answer = QMessageBox.question(self,'Auto Recovery effort?','Detected MIFARE Classic '+card.size.upper()+'\nUID: '+card.uid+'\n\nAttempt key recovery and a backup on a card you own or are authorized to assess?\n\n'+line+'\n\nThe client checks keys and selects supported recovery techniques. It can take many minutes and may fail or recover only some keys. It may save sensitive keys/dumps and fill device emulator memory. No card write or cloning command is queued.\n\nThe UID will be checked again before starting. Keep the same card on the antenna. Start this effort?',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            if resume_scan and self.compatible and self.session.ready: self.auto_detect.setChecked(True)
+            return
+        self.poll.stop(); self.auto_detect.setChecked(False); self.queue.clear()
+        self.pending_recovery = (card,line)
+        self.recovery_status.setText('Verifying the same card before recovery…')
+        self.dispatch('hf 14a reader',internal=True)
+
+    def record_card(self, command, text):
+        uid = card_uid(text)
+        if not uid: return
+        if self.current_uid != uid: self.info_verified_uid = None
+        self.current_uid = uid
+        record = self.card_records.setdefault(uid, {'uid':uid,'observations':{}})
+        record['last_seen'] = datetime.now().isoformat(timespec='seconds')
+        record['observations'][command] = EventLogFormatter().feed(text+'\n')
+        self.current_card.setPlainText(card_summary(uid,record['observations']))
+        try:
+            path = self.data_dir/'cards.json'; temporary = path.with_suffix('.tmp')
+            temporary.write_text(json.dumps(self.card_records,indent=2),encoding='utf-8'); temporary.replace(path)
+        except OSError as error: self.statusBar().showMessage('Could not save card history: '+str(error))
+
+    def show_saved_cards(self):
+        dialog = QDialog(self); dialog.setWindowTitle('Saved card observations'); dialog.resize(850,600)
+        layout = QVBoxLayout(dialog); view = QPlainTextEdit(); view.setReadOnly(True)
+        view.setPlainText('\n\n'.join(card_summary(uid,record.get('observations',{}))+'\nLast seen: '+record.get('last_seen','') for uid,record in self.card_records.items()) or 'No saved cards yet.')
+        layout.addWidget(view); layout.addWidget(self.button('Close',dialog.accept)); dialog.exec()
+
+    def review_information(self):
+        if not self.session.ready or self.queue or not self.compatible or not self.catalog_verified or self.pending_info or self.pending_recovery or self.recovery_running: return
+        card = self.recovery_card
+        if not card:
+            self.recovery_status.setText('Identify a MIFARE Classic card first. Other card technologies need their own information commands.'); return
+        if any(command not in self.commands for command in ['hf 14a reader','hf mf info']):
+            self.recovery_status.setText('Installed client lacks the recommended information commands.'); return
+        resume_scan = self.auto_detect.isChecked(); self.poll.stop(); self.auto_detect.setChecked(False)
+        answer = QMessageBox.question(self,'Recommended card information','UID: '+card.uid+'\n\nRun these read-only checks and save their results?\n\nhf 14a reader\nhf mf info\n\nThey verify identity and report available keys, fingerprint, magic capabilities and nonce properties. Some details require valid keys. Recovery will be offered separately after successful checks.',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            if resume_scan and self.compatible and self.session.ready: self.auto_detect.setChecked(True)
+            return
+        self.info_verified_uid = None; self.pending_info = card
+        self.recovery_status.setText('Collecting recommended card information…')
+        self.dispatch('hf 14a reader',internal=True)
+
+    def finish_recovery(self,message):
+        active = self.pending_recovery is not None or self.recovery_running
+        self.pending_recovery = self.approved_recovery = None
+        self.recovery_running = False
+        if self.recovery_timeout_index is not None:
+            self.timeout.setCurrentIndex(self.recovery_timeout_index)
+            self.recovery_timeout_index = None
+        if active: self.recovery_status.setText(message)
+        if hasattr(self,'recovery_button'): self.update_controls()
 
     def check_compatibility(self):
         device_lines = [line for line in self.device_version.splitlines() if re.search(r'(?:\bOS[.:]|Firmware)',line,re.I)]

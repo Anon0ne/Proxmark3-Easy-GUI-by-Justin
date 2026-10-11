@@ -46,7 +46,7 @@ try {
         $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $desktop 'Proxmark3 Engineering Suite.lnk'))
         $shortcut.TargetPath = $target
         $shortcut.WorkingDirectory = $PSScriptRoot
-        $shortcut.Description = 'Proxmark3 Easy GUI - by Justin 0.1b'
+        $shortcut.Description = 'Proxmark3 Easy GUI - by Justin 0.3b'
         $shortcut.Save()
     }
     Write-Host "Build complete: $target"

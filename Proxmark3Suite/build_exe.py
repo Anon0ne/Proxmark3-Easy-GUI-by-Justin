@@ -10,4 +10,6 @@ windows = Path(os.environ.get('SystemRoot',r'C:\Windows'))
 os.environ['PATH'] = os.pathsep.join(map(str,[Path(sys.executable).parent,Path(sys.base_prefix),windows/'System32',windows]))
 for key in ['QT_PLUGIN_PATH','QT_QPA_PLATFORM_PLUGIN_PATH','QT_QPA_PLATFORM']:
     os.environ.pop(key,None)
-PyInstaller.__main__.run(['--noconfirm','--clean','--onefile','--windowed','--name','Proxmark3Suite','app.py'])
+output = root / (sys.argv[1] if len(sys.argv) > 1 else 'dist')
+PyInstaller.__main__.run(['--noconfirm','--clean','--onefile','--windowed','--name','Proxmark3Suite',
+    '--distpath',str(output),'--workpath',str(root/'build'),'--specpath',str(root),str(root/'app.py')])
