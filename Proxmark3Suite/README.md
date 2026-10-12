@@ -1,8 +1,10 @@
-# Proxmark3 Easy GUI - by Justin · 0.5b beta
+For normal installation and use, start with the [homepage guide](../README.md). Linux instructions are in [LINUX.md](LINUX.md).
+
+# Proxmark3 Easy GUI - by Justin · 0.6b beta
 
 Windows beta of the Engineering Suite workbench, built from the v0.1.0 scaffold. MarauderGUI was a visual reference only; no Marauder command/backend code is used or distributed with this repository.
 
-Version 0.5b opens on Cards. Identify a card, approve its information checks, then review a separate Auto Recovery confirmation. One Next recommended step button follows this flow. Saved cards retain compact facts; raw output is available in Console and optional card activity details. Connection configuration is in Settings; hardware verification is in Hardware & compatibility. See [workflow research and test-card plan](AUTO_RECOVERY.md). No successful physical recovery or card write has been verified.
+Version 0.6b opens on Cards. Identify a card, approve its information checks, then review a separate Auto Recovery confirmation. One Next recommended step button follows this flow. Saved cards retain compact facts; raw output is available in Console and optional card activity details. Connection configuration is in Settings; hardware verification is in Hardware & compatibility. See [workflow research and test-card plan](AUTO_RECOVERY.md). No successful physical recovery or card write has been verified.
 
 This beta includes a four-stage activity bar, elapsed time, action labels that follow the workflow, operation locking and a simpler card panel. It fixes the pending-information reconnect exception. Current observations clear when the card disappears; saved history remains separate.
 
@@ -10,7 +12,7 @@ The Emulation tab adds 16 persistent PC slots for Classic Mini/1K/2K/4K dumps, b
 
 ## Run the Windows package
 
-Run the release Setup.exe to install for your Windows account with Desktop and Start menu shortcuts, or extract the Windows ZIP and run Proxmark3Suite.exe or Start.bat. Python is not required. The portable package's Install.bat optionally copies the EXE and creates a shortcut; use Setup.exe for Windows uninstall support. The compatible external Iceman client is still required; Settings can refresh detected COM ports. Connect & verify automatically discovers client commands and verifies the hardware. This is the published 0.5b beta. See the [homepage usage guide](../README.md) for everyday workflows.
+Run the release Setup.exe to install for your Windows account with Desktop and Start menu shortcuts, or extract the Windows ZIP and run Proxmark3Suite.exe or Start.bat. Python is not required. The portable package's Install.bat optionally copies the EXE and creates a shortcut; use Setup.exe for Windows uninstall support. The compatible external Iceman client is still required; Settings can refresh detected COM ports. Connect & verify automatically discovers client commands and verifies the hardware. This is the published 0.6b beta. See the [homepage usage guide](../README.md) for everyday workflows.
 
 ## Launch
 
@@ -68,4 +70,4 @@ Detected HF cards with a UID are stored locally in cards.json in the application
 
 ## Windows installer and icon
 
-Use the release Setup.exe for per-user installation, Desktop/Start menu shortcuts and Windows uninstall support. Python is bundled in the EXE. The external Iceman client is still required. The original vector icon is in `assets/`; `build_icon.py` generates seven Windows icon sizes. Build the EXE with `python build_exe.py dist-0.5b`, then compile `installer.iss` with Inno Setup 6.7.3 or compatible. The installer compiler is a build prerequisite, not an end-user dependency.
+Use the release Setup.exe for per-user installation, Desktop/Start menu shortcuts and Windows uninstall support. Python is bundled in the EXE. The external Iceman client is still required. The original vector icon is in `assets/`; `build_icon.py` generates seven Windows icon sizes. Build the EXE with `python build_exe.py dist-0.6b`, then compile `installer.iss` with Inno Setup 6.7.3 or compatible. The installer compiler is a build prerequisite, not an end-user dependency.

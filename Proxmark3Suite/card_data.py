@@ -102,6 +102,7 @@ class CardDataPanel(QWidget):
         splitter = QSplitter(); layout.addWidget(splitter,1)
         self.table = QTreeWidget(); self.table.setHeaderLabels(['Sector','Block','Kind','Draft hex','State'])
         self.table.header().setSectionResizeMode(3,QHeaderView.Stretch); self.table.setFont(QFont('Consolas',10)); splitter.addWidget(self.table)
+        for column in (0,1,2,4): self.table.header().setSectionResizeMode(column,QHeaderView.ResizeToContents)
         side = QWidget(); form = QVBoxLayout(side); splitter.addWidget(side); splitter.setStretchFactor(0,3); splitter.setStretchFactor(1,2)
         self.permissions = QPlainTextEdit(); self.permissions.setReadOnly(True); form.addWidget(self.permissions,1)
         form.addWidget(QLabel('Selected block draft — 16 hexadecimal bytes'))
@@ -135,7 +136,8 @@ class CardDataPanel(QWidget):
             differs = self.comparison is not None and payload != self.comparison[block*16:block*16+16]
             differences += differs
             state = ('Edited' if block in changed else 'Original')+(' · differs' if differs else '')
-            item = QTreeWidgetItem([str(sector),str(block),'Manufacturer' if block==0 else 'Trailer' if block==trailer else 'Data',payload.hex(' ').upper(),state])
+            item = QTreeWidgetItem([str(sector),str(block),'Manufacturer' if block==0 else 'Trailer' if block==trailer else 'Data',payload.hex().upper(),state])
+            item.setToolTip(3,payload.hex(' ').upper())
             item.setData(0,Qt.UserRole,block); self.table.addTopLevelItem(item)
             if block in changed or differs: item.setForeground(4,QColor('#17bda9'))
             if block==selected: self.table.setCurrentItem(item)

@@ -31,10 +31,15 @@ jobs:
           python build_exe.py dist-linux
           ./dist-linux/Proxmark3Suite --self-test linux-self-smoke
           python package_linux.py
+          mkdir -p linux-installer-smoke
+          tar -xzf ../release/*Linux*.tar.gz -C linux-installer-smoke
+          HOME="$PWD/linux-installer-smoke/home with spaces" sh linux-installer-smoke/Proxmark3EasyGUI/install.sh
+          "./linux-installer-smoke/home with spaces/.local/opt/Proxmark3EasyGUI/Proxmark3Suite" --self-test linux-installed-smoke
       - uses: actions/upload-artifact@v4
         with:
           name: linux-release
           path: |
             release/*Linux*.tar.gz
             Proxmark3Suite/linux-self-smoke/result.json
+            Proxmark3Suite/linux-installed-smoke/result.json
           if-no-files-found: error

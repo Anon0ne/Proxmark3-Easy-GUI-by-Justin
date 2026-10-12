@@ -1,20 +1,24 @@
 # Proxmark3 Easy GUI — by Justin
 
-A Windows app for identifying LF/HF cards, exploring Proxmark3 commands, collecting card information and managing saved MIFARE Classic dumps. The app is named **Proxmark3 Engineering Suite** on your Desktop.
+A Windows and Linux desktop app for identifying LF/HF cards, exploring Proxmark3 commands, collecting card information and managing saved MIFARE Classic dumps. The app is named **Proxmark3 Engineering Suite** on your Desktop.
 
-**Current release: 0.5b beta** · [Download Windows installer](https://github.com/Anon0ne/Proxmark3-Easy-GUI-by-Justin/releases/download/v0.5b/Proxmark3-Easy-GUI-0.5b-Setup.exe) · [All downloads and release notes](https://github.com/Anon0ne/Proxmark3-Easy-GUI-by-Justin/releases/tag/v0.5b)
+**Current release: 0.6b beta** · [Download Windows installer](https://github.com/Anon0ne/Proxmark3-Easy-GUI-by-Justin/releases/download/v0.6b/Proxmark3-Easy-GUI-0.6b-Setup.exe) · [All downloads and release notes](https://github.com/Anon0ne/Proxmark3-Easy-GUI-by-Justin/releases/tag/v0.6b)
 
-## Get started
+## Get started on Windows
 
 You need Windows 10/11, a Proxmark3 Easy with its USB driver, and a compatible installed Iceman/RRG Windows client. **The installer includes the app's Python and GUI dependencies**; you do not need Python to use it. The Iceman client and firmware are separate.
 
-1. Download and run **Proxmark3-Easy-GUI-0.5b-Setup.exe**. It installs for your Windows account and creates Desktop and Start menu shortcuts. Alternatively, extract the portable Windows ZIP and run `Proxmark3Suite.exe`.
+1. Download and run **Proxmark3-Easy-GUI-0.6b-Setup.exe**. It installs for your Windows account and creates Desktop and Start menu shortcuts. Alternatively, extract the portable Windows ZIP and run `Proxmark3Suite.exe`.
 2. Connect your Proxmark3 Easy by USB. Close any other Proxmark3 client using its COM port.
-3. Open **Proxmark3 Engineering Suite**, then **Connection settings**. Select your existing `pm3.bat` or client EXE and the device's COM port.
+3. Open **Proxmark3 Engineering Suite**, then **Connection settings**. Use **Find installed client & ports**, or select your existing `pm3.bat` or client EXE and the device's COM port.
 4. Click **Connect & verify**. The app discovers your client's commands and checks device compatibility. Review any mismatch in **Hardware & compatibility** before continuing.
 5. Open **Cards**, place one card on the appropriate antenna, and click **Identify card**.
 
-The configured defaults are `C:\rrg_other\pm3.bat`, **COM18**, **PM3 GENERIC / Easy**, and Iceman revision **v4.21611-636-gda509461b**. Choose the port assigned to your reader; COM18 is the tested local setup.
+The Windows defaults are `C:\rrg_other\pm3.bat`, **COM18**, **PM3 GENERIC / Easy**, and Iceman revision **v4.21611-636-gda509461b**. Choose the port assigned to your reader; COM18 is the tested local setup.
+
+## Get started on Linux
+
+Download the **Linux x86_64 tar.gz** from the release page, extract it and run `Proxmark3EasyGUI/Proxmark3Suite`. Ubuntu 24.04 x86_64 is the tested build baseline. Use a matching native Iceman client and select `/dev/ttyACM0` or your actual device in Settings. Run `sh Proxmark3EasyGUI/install.sh` for an optional per-user application-menu launcher. See the [Linux guide](Proxmark3Suite/LINUX.md) for dependencies, permissions and platform limits.
 
 ## Identify a card and collect information
 
@@ -46,6 +50,12 @@ PC slots are your saved library. The Proxmark3 has **one current emulator buffer
 
 Loading and RF simulation are implemented but have not yet been verified on physical hardware. Starting simulation does not prove successful interaction with a reader. See the [emulation guide](Proxmark3Suite/EMULATION.md) for supported formats, controls and device limits.
 
+## Inspect, compare and edit card data
+
+![Card Data screen — synthetic dump preview](Proxmark3Suite/gui-card-data-preview.png)
+
+Open **Card Data** to inspect a Classic BIN, DUMP, EML or supported JSON file, or select **Inspect/edit…** on an Emulation slot. Select a block to see decoded access permissions and original bytes. Enter 16 hexadecimal bytes and choose **Apply to local draft**. Use **Undo**, **Compare dump…** and **Export draft…** to review and save a separate file. Original dumps and saved slots remain unchanged. Invalid access bits are identified; manufacturer/trailer edits receive an extra review. This editor does not write physical cards or load device memory.
+
 ## Explore commands without memorizing their syntax
 
 ![Command workbench preview](Proxmark3Suite/gui-preview.png)
@@ -62,6 +72,7 @@ The verified target client exposes **989 commands and 3,716 options**. Your cata
 | --- | --- |
 | **Cards** | Read-only LF/HF identification, current-card facts, saved observations, information checks and separately approved Classic recovery. |
 | **Emulation** | Saved PC slots, dump inspection, import/export, device memory capture, confirmed loading and simulation controls. |
+| **Card Data** | Sector/block inspection, decoded permissions, local hex drafts, undo, dump comparison and separate export. |
 | **Command workbench** | Searchable firmware commands, argument forms, exact help, command previews, favorites and history. |
 | **Hardware & compatibility** | Device version, status and ping diagnostics; client/firmware/model compatibility checks. |
 | **Firmware updates** | Prepare latest or named RRG revisions, build for Generic Easy, review artifacts and confirm flashing. Requires a configured ProxSpace toolchain. |
@@ -84,7 +95,7 @@ The top **Help** menu includes getting started, card positioning, recovery, trou
 
 ## Beta status
 
-**Verified:** 48 automated tests; installer and installed EXE startup on the development PC; command discovery; earlier physical COM18 hardware diagnostics, card identification, matching authenticated card backups, and read-only emulator viewing/capture with PC-slot matching.
+**Verified:** 54 automated tests on Windows and Ubuntu 24.04; packaged startup on both platforms; Windows installer on the development PC; Linux per-user installer in CI; Windows installed-client command discovery; earlier physical COM18 hardware diagnostics, card identification, matching authenticated card backups, and read-only emulator viewing/capture with PC-slot matching.
 
 **Still unverified end to end:** successful physical autopwn recovery, card writing, device emulator loading, RF simulation/reader interaction, latest firmware compilation/flashing, clean-machine installation and the Python-missing source setup path. The EXE and installer are unsigned.
 
