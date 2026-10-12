@@ -146,11 +146,19 @@ class Window(QMainWindow):
         self.workflow_prompt = False
         self.workflow_stage = 'idle'
         self.workflow_started = None
+        self.card_history_error = None
         try:
-            self.card_records = json.loads((self.data_dir/'cards.json').read_text(encoding='utf-8'))
-            if not isinstance(self.card_records,dict): self.card_records = {}
-            self.card_records = {uid:record for uid,record in self.card_records.items() if isinstance(record,dict) and isinstance(record.get('observations'),dict) and all(isinstance(k,str) and isinstance(v,str) for k,v in record['observations'].items())}
-        except (OSError,ValueError): self.card_records = {}
+            records = json.loads((self.data_dir/'cards.json').read_text(encoding='utf-8'))
+            if not isinstance(records,dict) or any(
+                not isinstance(record,dict) or not isinstance(record.get('observations'),dict) or
+                not isinstance(record.get('last_seen',''),str) or
+                any(not isinstance(k,str) or not isinstance(v,str) for k,v in record['observations'].items())
+                for record in records.values()):
+                raise ValueError('Invalid saved-card history structure.')
+            self.card_records = records
+        except FileNotFoundError: self.card_records = {}
+        except (OSError,ValueError) as error:
+            self.card_records = {}; self.card_history_error = str(error)
         self.expected = self.settings.value('expected',TARGET)
         self.runtime_bin = self.settings.value('runtime_bin','')
         self.device_status = ''
@@ -705,6 +713,8 @@ class Window(QMainWindow):
         self.card_identity.setText(uid)
         card = detect_classic(text)
         self.card_presence.setText('MIFARE Classic '+card.size.upper()+' · detected this session' if card else 'Card observed this session · information below')
+        if self.card_history_error:
+            self.statusBar().showMessage('Saved-card history cannot be read and is preserved. New observations are session-only until the history is repaired.'); return
         try:
             path = self.data_dir/'cards.json'; temporary = path.with_suffix('.tmp')
             temporary.write_text(json.dumps(self.card_records,indent=2),encoding='utf-8'); temporary.replace(path)
@@ -713,6 +723,9 @@ class Window(QMainWindow):
     def show_saved_cards(self):
         dialog = QDialog(self); dialog.setWindowTitle('Saved card observations'); dialog.resize(850,600)
         layout = QVBoxLayout(dialog); view = QPlainTextEdit(); view.setReadOnly(True)
+        if self.card_history_error:
+            warning = QLabel('The saved history could not be read and has not been overwritten. Listed observations are session-only. Preserve and repair '+str(self.data_dir/'cards.json')+' before saving new history.\n'+self.card_history_error)
+            warning.setWordWrap(True); layout.addWidget(warning)
         view.setPlainText('\n\n'.join(card_summary(uid,record.get('observations',{}))+'\nLast seen: '+record.get('last_seen','') for uid,record in self.card_records.items()) or 'No saved cards yet.')
         layout.addWidget(view); layout.addWidget(self.button('Close',dialog.accept)); dialog.exec()
 

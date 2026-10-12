@@ -13,6 +13,8 @@ Research date: October 12, 2026. This is a prioritized backlog, not a list of fe
 
 ## Next priorities
 
+The High-priority items below are core completion work, not optional enhancements. [Product readiness](PRODUCT_READINESS.md) defines their acceptance gates and the evidence required for comparative claims.
+
 | Priority | Feature | User benefit and release requirement |
 | --- | --- | --- |
 | High | Guided selected-block reads | Choose sectors/blocks and supplied keys; show success, failure and unread blocks separately. Save completeness metadata rather than zero-filling unknown data and calling it recovered. |

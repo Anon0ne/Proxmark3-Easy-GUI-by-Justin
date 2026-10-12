@@ -87,6 +87,29 @@ class CatalogTests(unittest.TestCase):
         with self.assertRaises(ValueError): recovery_command(ClassicCard('12345678','1k'),{})
 
 class UiTests(unittest.TestCase):
+    def test_corrupt_card_history_is_preserved_after_new_observation(self):
+        path = Path(self.temp.name)/'cards.json'; original = b'{broken history'
+        path.write_bytes(original)
+        other = Window(self.temp.name,QSettings(str(Path(self.temp.name)/'other.ini'),QSettings.IniFormat),auto_discover=False)
+        try:
+            self.assertIsNotNone(other.card_history_error)
+            other.record_card('hf search','[+] UID: 12 34 56 78\nMIFARE Classic 1K\n')
+            self.assertEqual(path.read_bytes(),original)
+            self.assertEqual(other.current_uid,'12345678')
+            self.assertIn('session-only',other.statusBar().currentMessage())
+        finally: other.close(); other.deleteLater(); app.processEvents()
+
+    def test_invalid_history_record_does_not_silently_remove_other_records(self):
+        path = Path(self.temp.name)/'cards.json'
+        original = b'{"12345678":{"observations":{}},"87654321":{"observations":[],"last_seen":5}}'
+        path.write_bytes(original)
+        other = Window(self.temp.name,QSettings(str(Path(self.temp.name)/'other.ini'),QSettings.IniFormat),auto_discover=False)
+        try:
+            self.assertIsNotNone(other.card_history_error)
+            other.record_card('hf search','[+] UID: 12 34 56 78\n')
+            self.assertEqual(path.read_bytes(),original)
+        finally: other.close(); other.deleteLater(); app.processEvents()
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(dir=ROOT)
         self.window = Window(self.temp.name,QSettings(str(Path(self.temp.name)/'settings.ini'),QSettings.IniFormat),auto_discover=False)

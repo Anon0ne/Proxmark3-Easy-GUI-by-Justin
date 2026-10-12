@@ -70,3 +70,7 @@ Event-log/Help update: 23 unit tests passed, including split ANSI chunks and car
 - Reference GUI documentation was reviewed, not installed or hardware-tested. Future Features is a backlog, not a shipped-capability claim. No new card writes, physical recovery, device emulator loading/RF interaction or firmware flashing were performed.
 
 Linux verification: [build and installer run](https://github.com/Anon0ne/Proxmark3-Easy-GUI-by-Justin/actions/runs/38213148686). Linux distribution baseline is Ubuntu 24.04 x86_64; other distributions/architectures and clean-machine Windows setup remain unverified.
+
+## Unreleased readiness hardening — October 12, 2026
+
+56 automated tests passed locally on Windows after adding two corrupted-history preservation regressions. No device commands were executed for this audit. The saved-history fix is in source after v0.6b; released binaries and the installed Desktop app are unchanged. Core gaps and comparative benchmark requirements are recorded in PRODUCT_READINESS.md.
