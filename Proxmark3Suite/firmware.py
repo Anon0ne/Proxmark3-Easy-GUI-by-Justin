@@ -5,6 +5,8 @@ from pathlib import Path
 import re
 import shlex
 import uuid
+import sys
+from pathlib import PureWindowsPath
 from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer
 from PySide6.QtWidgets import QWidget,QVBoxLayout,QHBoxLayout,QLabel,QLineEdit,QPushButton,QPlainTextEdit,QMessageBox,QFileDialog
 from backend import client_environment,start_external
@@ -15,7 +17,8 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 def build_script(path):
-    posix = '/' + path.drive[0].lower() + str(path)[2:].replace('\\','/')
+    winpath = PureWindowsPath(str(path))
+    posix = '/' + winpath.drive[0].lower() + str(path)[2:].replace('\\','/') if winpath.drive else str(path)
     return ('export PATH=/mingw64/bin:/usr/bin:$PATH; cd ' + shlex.quote(posix) +
             ' && command -v arm-none-eabi-gcc && command -v make && make clean && make -j2 PLATFORM=PM3GENERIC LED_ORDER=PM3EASY')
 
@@ -26,7 +29,7 @@ class FirmwarePanel(QWidget):
         note = QLabel('Iceman / RRG firmware workspace\n“latest” resolves the repository’s default branch to an exact commit. Each build uses a new checkout.\nBuild target: PM3GENERIC, Easy LED order, 512 KB. A configured ProxSpace toolchain is required.\nFlashing updates the fullimage only. Bootloader flashing is deliberately a separate manual maintenance procedure.')
         note.setWordWrap(True); layout.addWidget(note)
         self.ref = QLineEdit('latest'); self.ref.setPlaceholderText('latest or upstream release tag / branch')
-        self.toolchain = QLineEdit(owner.settings.value('toolchain',r'C:\Users\Funde\Downloads\ProxSpace-3.12\msys2'))
+        self.toolchain = QLineEdit(owner.settings.value('toolchain',''))
         layout.addWidget(QLabel('Upstream revision')); layout.addWidget(self.ref)
         layout.addWidget(QLabel('ProxSpace MSYS2 directory')); layout.addWidget(self.toolchain)
         browse = QPushButton('Choose toolchain…'); browse.clicked.connect(self.browse); layout.addWidget(browse)
@@ -39,6 +42,9 @@ class FirmwarePanel(QWidget):
         self.process.finished.connect(self.finished)
         self.process.errorOccurred.connect(lambda _: self.fail(self.process.errorString()))
         self.steps = []; self.accumulated = ''; self.callback = None
+        if sys.platform != 'win32':
+            note.setText('Firmware download/build/flashing is currently supported by the Windows ProxSpace workflow only. On Linux use the upstream RRG build instructions and select the matching native client in Settings. Card and command workflows remain available.')
+            self.prepare.setEnabled(False); self.toolchain.setEnabled(False); browse.setEnabled(False)
 
     def browse(self):
         path = QFileDialog.getExistingDirectory(self,'Select ProxSpace msys2 directory')
@@ -73,6 +79,7 @@ class FirmwarePanel(QWidget):
         self.log('\n[ERROR] '+message+'\n'); self.busy = False; self.prepare.setEnabled(True); self.flash_button.setEnabled(False); self.staged = None
 
     def stage(self):
+        if sys.platform != 'win32': self.fail('Use the upstream native Linux firmware build workflow.'); self.prepare.setEnabled(False); return
         if self.busy: return
         if self.owner.workflow_busy() or self.owner.session.active:
             self.owner.statusBar().showMessage('Finish or stop the current client operation before building firmware.'); return

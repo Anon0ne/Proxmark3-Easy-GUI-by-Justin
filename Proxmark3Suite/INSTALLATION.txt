@@ -1,4 +1,4 @@
-Proxmark3 Engineering Suite 0.5b - by Justin
+Proxmark3 Engineering Suite 0.6b - by Justin
 
 The Windows installer includes Python and GUI runtime dependencies. End users
 do not need to install Python. An external compatible Iceman/RRG client and

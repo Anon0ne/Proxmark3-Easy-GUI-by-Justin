@@ -11,14 +11,14 @@ from PySide6.QtCore import Qt, QProcess, QTimer, QSettings, QStandardPaths
 from PySide6.QtGui import QFont, QIcon, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,
     QTreeWidget,QTreeWidgetItem,QLineEdit,QPushButton,QPlainTextEdit,QLabel,QComboBox,
-    QFormLayout,QSplitter,QMessageBox,QFileDialog,QCheckBox,QTabWidget,QScrollArea,QHeaderView,QDialog,QTextBrowser,QProgressBar,QGroupBox,QFrame)
+    QFormLayout,QSplitter,QMessageBox,QFileDialog,QCheckBox,QTabWidget,QScrollArea,QHeaderView,QDialog,QTextBrowser,QProgressBar,QGroupBox,QFrame,QInputDialog)
 from eventlog import EventLogFormatter
-from launch_support import serial_ports
+from launch_support import serial_ports,client_candidates,default_client,default_port
 from catalog import parse_dump, build_command, needs_confirmation, clean
 from backend import Session, resolve_client, client_environment, start_external
 from recovery import detect_classic,card_uid,recovery_command,card_summary
 
-VERSION = '0.5b'
+VERSION = '0.6b'
 TARGET = 'v4.21611-636-gda509461b'
 HELP_TOPICS = {
     'Getting started': '''# Getting started
@@ -178,9 +178,9 @@ class Window(QMainWindow):
         layout.addWidget(subtitle)
         self.badge = QLabel('●  DISCONNECTED'); self.compat = QLabel('Compatibility: not verified')
         layout.addLayout(row(self.badge, self.compat))
-        self.launcher = QLineEdit(self.settings.value('launcher', r'C:\rrg_other\pm3.bat'))
+        self.launcher = QLineEdit(self.settings.value('launcher',default_client()))
         self.launcher.setAccessibleName('Client launcher path')
-        self.port = QComboBox(); self.port.setEditable(True); self.port.addItem(self.settings.value('port','COM18'))
+        self.port = QComboBox(); self.port.setEditable(True); self.port.addItem(self.settings.value('port',default_port()))
         self.offline = QCheckBox('Offline tools')
         setup = QWidget(); setup_layout = QVBoxLayout(setup)
         setup_layout.addWidget(QLabel('Connection settings and command catalog'))
@@ -188,6 +188,7 @@ class Window(QMainWindow):
         setup_help.setWordWrap(True); setup_layout.addWidget(setup_help)
         setup_layout.addLayout(row(QLabel('Client'),self.launcher,self.button('Browse…',self.browse)))
         setup_layout.addLayout(row(QLabel('Port'),self.port,self.button('Refresh ports',self.refresh_ports),self.offline))
+        setup_layout.addWidget(self.button('Find installed client & ports',self.find_setup))
         self.refresh_ports()
         self.connect_button = self.button('Connect & verify',self.connect_client,primary=True)
         self.discover_button = self.button('Refresh command catalog',self.discover)
@@ -277,6 +278,8 @@ class Window(QMainWindow):
         self.firmware = FirmwarePanel(self); self.tabs.addTab(self.firmware,'Firmware updates')
         from emulation import EmulationPanel
         self.emulation = EmulationPanel(self); self.tabs.insertTab(1,self.emulation,'Emulation')
+        from card_data import CardDataPanel
+        self.card_data = CardDataPanel(self); self.tabs.insertTab(2,self.card_data,'Card Data')
         self.history = QComboBox(); self.history.setEditable(True); self.history.addItems(self.history_items); self.history.setCurrentText(''); self.history.setMinimumWidth(300)
         console_page = QWidget(); console_layout = QVBoxLayout(console_page)
         self.send_button = self.button('Send',self.send_console)
@@ -339,8 +342,24 @@ class Window(QMainWindow):
         self.set_workflow('failed',message)
 
     def browse(self):
-        path,_ = QFileDialog.getOpenFileName(self,'Select launcher / client','','Client (*.bat *.exe)')
+        path,_ = QFileDialog.getOpenFileName(self,'Select launcher / client','','Client (*.bat *.exe)' if sys.platform=='win32' else 'All files (*)')
         if path: self.launcher.setText(path); self.invalidate(); self.discover()
+
+    def find_setup(self):
+        if self.workflow_busy() or self.session.ready or self.session.active or self.firmware.busy:
+            self.statusBar().showMessage('Disconnect or stop the current operation before changing settings.'); return
+        self.refresh_ports()
+        candidates = client_candidates()
+        if not candidates:
+            QMessageBox.information(self,'Client setup','No installed Iceman client found. Choose Browse to select it. The GUI does not include the external client. On Linux select the native proxmark3 executable and ensure your account can access its serial device.'); return
+        chosen = candidates[0]
+        if len(candidates)>1:
+            chosen,accepted = QInputDialog.getItem(self,'Select installed client','Client',candidates,0,False)
+            if not accepted: return
+        self.launcher.setText(chosen); self.settings.setValue('launcher',chosen); self.invalidate(); self.discover()
+        ports = serial_ports()
+        if len(ports)==1: self.port.setCurrentText(ports[0])
+        self.statusBar().showMessage('Review the port, then Connect & verify. Detected ports: '+(', '.join(ports) or 'none'))
 
     def run_probe(self,arguments,callback):
         try: exe = resolve_client(self.launcher.text())
@@ -760,6 +779,7 @@ class Window(QMainWindow):
             except OSError as error: self.failure(str(error))
 
     def closeEvent(self,event):
+        if hasattr(self,'card_data') and not self.card_data.discard_allowed(): event.ignore(); return
         if hasattr(self,'emulation') and self.emulation.simulating and self.session.ready:
             self.emulation.stop_simulation()
             self.statusBar().showMessage('Stopping simulation. Close again after the break command finishes.')
@@ -777,7 +797,15 @@ class Window(QMainWindow):
 if __name__ == '__main__':
     app = QApplication(sys.argv); app.setStyle('Fusion')
     app.setOrganizationName('Anon0ne'); app.setApplicationName('Proxmark3EngineeringSuite')
-    if '--smoke-test' in sys.argv:
+    if '--self-test' in sys.argv:
+        probe_dir = Path(sys.argv[sys.argv.index('--self-test')+1]); probe_dir.mkdir(parents=True,exist_ok=True)
+        window = Window(probe_dir,QSettings(str(probe_dir/'settings.ini'),QSettings.IniFormat),auto_discover=False)
+        window.commands = parse_dump((Path(__file__).resolve().parent/'client-help.txt').read_text(encoding='utf-8-sig'))
+        window.populate(); window.show(); app.processEvents()
+        result = {'commands':len(window.commands),'platform':sys.platform,'serial_access':False,'icon_loaded':not window.windowIcon().isNull(),'card_data_tab':window.tabs.indexOf(window.card_data)>=0}
+        (probe_dir/'result.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
+        window.close(); sys.exit(0 if all((result['commands']>0,result['icon_loaded'],result['card_data_tab'])) else 1)
+    elif '--smoke-test' in sys.argv:
         # Metadata only by default. Explicit --hardware enables read-only
         # connection/compatibility diagnostics for release verification.
         smoke_dir = Path(sys.argv[sys.argv.index('--smoke-test')+1]); smoke_dir.mkdir(parents=True,exist_ok=True)

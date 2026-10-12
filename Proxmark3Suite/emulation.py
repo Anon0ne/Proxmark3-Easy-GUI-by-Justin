@@ -19,7 +19,7 @@ def inspect_dump(path):
     path = Path(path)
     if path.stat().st_size > 250_000: raise ValueError('Dump is too large for a Classic card.')
     uid = None
-    if path.suffix.lower() == '.bin':
+    if path.suffix.lower() in {'.bin','.dump'}:
         data = path.read_bytes()
     elif path.suffix.lower() == '.eml':
         lines = [line.strip() for line in path.read_text(encoding='utf-8-sig').splitlines() if line.strip()]
@@ -160,7 +160,7 @@ class EmulationPanel(QWidget):
         self.table.setRootIsDecorated(False); self.table.itemSelectionChanged.connect(self.selection)
         lv.addWidget(self.table)
         local = QHBoxLayout(); lv.addLayout(local)
-        for text,callback in [('Import dump…',self.import_dump),('Rename',self.rename),('Export…',self.export),('Clear slot',self.clear)]:
+        for text,callback in [('Import dump…',self.import_dump),('Inspect/edit…',self.inspect_slot),('Rename',self.rename),('Export…',self.export),('Clear slot',self.clear)]:
             button = QPushButton(text); button.clicked.connect(callback); local.addWidget(button)
         self.save_recovered = QPushButton('Save recovered dump to selected slot'); self.save_recovered.clicked.connect(self.save_recovery); self.save_recovered.setEnabled(False); lv.addWidget(self.save_recovered)
         split.addWidget(left)
@@ -219,6 +219,15 @@ class EmulationPanel(QWidget):
             self.slot_data.clear()
         self.update_controls()
 
+    def inspect_slot(self):
+        record = self.library.slots.get(str(self.slot_number()))
+        if not record: return
+        try:
+            self.library.verified(record)
+            if self.owner.card_data.load_path(self.library.file(record)):
+                self.owner.tabs.setCurrentWidget(self.owner.card_data)
+        except (OSError,ValueError) as error: self.inform(error)
+
     def update_controls(self):
         if not hasattr(self,'buttons'): return
         available = self.owner.session.ready and self.owner.compatible and self.owner.catalog_verified and not self.owner.firmware.busy and not self.owner.pending_info and not self.owner.pending_recovery and not self.owner.recovery_running and not self.owner.workflow_prompt and self.owner.workflow_stage != 'identifying' and not self.owner.queue
@@ -248,7 +257,7 @@ class EmulationPanel(QWidget):
         except (OSError,ValueError,TypeError) as error: self.inform(error)
 
     def import_dump(self):
-        path,_ = QFileDialog.getOpenFileName(self,'Import Classic card dump','','Classic dumps (*.bin *.eml *.json)')
+        path,_ = QFileDialog.getOpenFileName(self,'Import Classic card dump','','Classic dumps (*.bin *.dump *.eml *.json)')
         if path: self.save_file(path)
 
     def rename(self):

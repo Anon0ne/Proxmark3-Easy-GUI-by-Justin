@@ -6,9 +6,9 @@ import sys
 from app import VERSION
 
 root = Path(__file__).resolve().parent
-exe = root/(sys.argv[1] if len(sys.argv)>1 else 'dist-0.5b')/'Proxmark3Suite.exe'
+exe = root/(sys.argv[1] if len(sys.argv)>1 else 'dist-0.6b')/'Proxmark3Suite.exe'
 target = root.parent/f'Proxmark3-Easy-GUI-{VERSION}-Windows.zip'
-readme = """Proxmark3 Engineering Suite — 0.5b beta
+readme = """Proxmark3 Engineering Suite — 0.6b beta
 
 1. Extract the entire archive into a folder.
 2. Run Proxmark3Suite.exe or Start.bat. Python is not required.

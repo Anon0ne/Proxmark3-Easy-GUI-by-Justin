@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import uuid
 import sys
+import shutil
 from PySide6.QtCore import QObject, QProcess, QProcessEnvironment, QTimer, Signal
 from catalog import clean, validate_line
 
@@ -23,6 +24,13 @@ def start_external(process):
 
 def client_environment(exe, runtime_bin=''):
     env = QProcessEnvironment.systemEnvironment()
+    if sys.platform != 'win32':
+        original = env.value('LD_LIBRARY_PATH_ORIG')
+        if original: env.insert('LD_LIBRARY_PATH',original)
+        else: env.remove('LD_LIBRARY_PATH')
+        for key in ('QT_PLUGIN_PATH','QT_QPA_PLATFORM_PLUGIN_PATH','QT_QPA_PLATFORM'):
+            env.remove(key)
+        return env
     libs = str(Path(exe).parent / 'libs')
     env.insert('PATH', libs + os.pathsep + str(Path(libs) / 'shell') + os.pathsep + env.value('PATH'))
     if runtime_bin:
@@ -35,6 +43,11 @@ def client_environment(exe, runtime_bin=''):
     return env
 
 def resolve_client(path):
+    if sys.platform != 'win32':
+        resolved = shutil.which(str(path)) if not Path(path).is_file() else str(Path(path).resolve())
+        if not resolved or not os.access(resolved,os.X_OK) or Path(resolved).suffix.lower() in {'.bat','.exe'}:
+            raise ValueError('Choose the executable Linux proxmark3 client, not pm3.bat or a Windows EXE.')
+        return resolved
     path = Path(path)
     if path.suffix.lower() == '.bat':
         path = path.parent / 'client' / 'proxmark3.exe'
@@ -80,8 +93,8 @@ class Session(QObject):
     def start(self, exe, port, workdir, offline=False, runtime_bin=''):
         if self.process.state() != QProcess.NotRunning:
             raise ValueError('Disconnect the current session first.')
-        if not re.fullmatch(r'COM\d+', port, re.I):
-            raise ValueError('Port must be COM followed by its number.')
+        if not offline and not (re.fullmatch(r'COM\d+',port,re.I) if sys.platform == 'win32' else re.fullmatch(r'/dev/(?:ttyACM\d+|ttyUSB\d+|serial/by-id/[^/\s]+)',port)):
+            raise ValueError('Choose a COM port.' if sys.platform == 'win32' else 'Choose /dev/ttyACM*, /dev/ttyUSB* or /dev/serial/by-id/... .')
         self.buffer = ''
         self.active = None
         self.ready = False

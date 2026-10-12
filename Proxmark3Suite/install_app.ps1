@@ -17,7 +17,7 @@ try {
         $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $desktop 'Proxmark3 Engineering Suite.lnk'))
         $shortcut.TargetPath = $target
         $shortcut.WorkingDirectory = $destination
-        $shortcut.Description = 'Proxmark3 Engineering Suite 0.5b beta'
+        $shortcut.Description = 'Proxmark3 Engineering Suite 0.6b beta'
         $shortcut.IconLocation = $target + ',0'
         $shortcut.Save()
     }

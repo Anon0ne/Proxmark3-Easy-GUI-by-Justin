@@ -90,6 +90,8 @@ The top **Help** menu includes getting started, card positioning, recovery, trou
 
 See the [verification record](Proxmark3Suite/VERIFICATION.md), [release notes](RELEASE_NOTES.md) and [detailed usage and firmware guide](Proxmark3Suite/README.md). Screenshots above are illustrative GUI previews, not evidence of hardware operations.
 
+See [Future Features](Proxmark3Suite/FUTURE_FEATURES.md) for researched additions and their priorities. These are separate from the features shipped above.
+
 ## For developers
 
 To build from source, open the `Proxmark3Suite` folder and run:
