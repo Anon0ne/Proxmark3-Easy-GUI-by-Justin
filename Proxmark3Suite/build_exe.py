@@ -11,5 +11,8 @@ os.environ['PATH'] = os.pathsep.join(map(str,[Path(sys.executable).parent,Path(s
 for key in ['QT_PLUGIN_PATH','QT_QPA_PLATFORM_PLUGIN_PATH','QT_QPA_PLATFORM']:
     os.environ.pop(key,None)
 output = root / (sys.argv[1] if len(sys.argv) > 1 else 'dist')
+from build_icon import build
+build()
 PyInstaller.__main__.run(['--noconfirm','--clean','--onefile','--windowed','--name','Proxmark3Suite',
+    '--icon',str(root/'assets/app-icon.ico'),'--add-data',str(root/'assets')+';assets',
     '--distpath',str(output),'--workpath',str(root/'build'),'--specpath',str(root),str(root/'app.py')])

@@ -74,6 +74,8 @@ class FirmwarePanel(QWidget):
 
     def stage(self):
         if self.busy: return
+        if self.owner.workflow_busy() or self.owner.session.active:
+            self.owner.statusBar().showMessage('Finish or stop the current client operation before building firmware.'); return
         ref = self.ref.text().strip()
         if ref != 'latest' and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._/-]*',ref): self.fail('Enter latest or a valid upstream branch/tag.'); return
         bash = Path(self.toolchain.text())/'usr/bin/bash.exe'
@@ -116,6 +118,8 @@ class FirmwarePanel(QWidget):
 
     def flash(self):
         if self.busy or not self.staged: return
+        if self.owner.workflow_busy():
+            self.owner.statusBar().showMessage('Finish or stop the current card workflow before flashing firmware.'); return
         if not self.owner.session.ready or self.owner.port.currentText() != getattr(self.owner,'session_port','') or getattr(self.owner,'session_offline',True):
             QMessageBox.warning(self,'Live verification required','Connect to the intended port and run hardware diagnostics before installing firmware.'); return
         manifest = self.staged

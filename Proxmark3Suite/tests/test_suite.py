@@ -117,6 +117,7 @@ class UiTests(unittest.TestCase):
     def test_confirmation_cancel_does_not_send(self):
         self.window.session_path = self.window.launcher.text(); self.window.session_port = self.window.port.currentText(); self.window.session_offline = False
         self.window.compatible = True
+        self.window.session.ready = True
         with patch.object(QMessageBox,'question',return_value=QMessageBox.No), patch.object(self.window.session,'send') as send:
             self.window.dispatch('hf mf wrbl --blk 0')
             send.assert_not_called()
@@ -212,5 +213,52 @@ class UiTests(unittest.TestCase):
             self.assertIn(fact,summary)
         for noise in ['Searching','Hint:','SUITE_','[+]','[usb']: self.assertNotIn(noise,summary)
         self.assertEqual(summary.count('Magic capabilities:'),1)
+
+    def test_pending_workflow_blocks_reconnect_without_exception(self):
+        self.window.pending_info = ClassicCard('12345678','1k')
+        with patch.object(self.window.session,'start') as start:
+            self.window.connect_client(); start.assert_not_called()
+        self.assertIsNotNone(self.window.pending_info)
+
+    def test_pending_workflow_blocks_unrelated_commands_and_searches(self):
+        self.prepare_recovery()
+        self.window.pending_info = self.window.recovery_card
+        self.window.queue = ['hw status']
+        with patch.object(self.window.session,'send') as send:
+            self.window.dispatch('hw version')
+            self.window.identify(); self.window.diagnostics()
+            send.assert_not_called()
+        self.assertIsNotNone(self.window.pending_info)
+        self.assertEqual(self.window.queue,['hw status'])
+
+    def test_progress_tracks_stages_without_fake_percentages(self):
+        self.window.set_workflow('recovering','Recovering',True)
+        self.assertEqual(self.window.workflow_progress.maximum(),0)
+        self.assertFalse(self.window.workflow_progress.isTextVisible())
+        self.assertTrue(self.window.elapsed_timer.isActive())
+        self.window.set_workflow('inspected','Information collected')
+        self.assertEqual(self.window.workflow_progress.value(),2)
+        self.assertEqual(self.window.workflow_progress.maximum(),4)
+        self.assertFalse(self.window.elapsed_timer.isActive())
+
+    def test_current_card_clears_after_no_card_but_history_remains(self):
+        self.window.offer_auto_recovery.setChecked(False)
+        self.window.result('hf search','UID: 12 34 56 78\nMIFARE Classic 1K\nMagic capabilities... Gen 1a\n')
+        self.window.result('hf search','No known/supported 13.56 MHz tags found\n')
+        self.assertIsNone(self.window.current_uid)
+        self.assertEqual(self.window.current_card.toPlainText(),'')
+        self.assertIn('12345678',self.window.card_records)
+
+    def test_recovery_communication_failure_shows_failure_stage(self):
+        self.prepare_recovery(); self.window.recovery_running = True
+        self.window.result('hf mf autopwn --1k --file mfc_default_keys','No tag detected or other tag communication error')
+        self.assertEqual(self.window.workflow_stage,'failed')
+        self.assertFalse(self.window.recovery_running)
+
+    def test_dispatch_busy_session_does_not_invalidate_connection(self):
+        self.window.compatible = True; self.window.session.ready = False
+        with patch.object(self.window.session,'send') as send:
+            self.window.dispatch('hw version'); send.assert_not_called()
+        self.assertTrue(self.window.compatible)
 
 if __name__ == '__main__': unittest.main()

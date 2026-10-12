@@ -1,0 +1,17 @@
+Proxmark3 Engineering Suite 0.5b - by Justin
+
+The Windows installer includes Python and GUI runtime dependencies. End users
+do not need to install Python. An external compatible Iceman/RRG client and
+USB device drivers are required; they are not bundled here.
+
+Defaults: C:\rrg_other\pm3.bat, COM18, PM3 GENERIC / Easy,
+Iceman v4.21611-636-gda509461b. Set your client and port in Connection settings.
+
+Installation is per user. Desktop and Start menu shortcuts are created.
+Uninstall through Windows Installed Apps. User card data and settings are
+stored separately and are preserved during upgrades and uninstall.
+
+This beta is unsigned. Physical recovery, emulator loading/RF simulation,
+card writing and firmware flashing have not been verified end to end.
+Read-only identification, hardware diagnostics and emulator capture were
+verified on the local device. Review VERIFICATION.md for the precise scope.

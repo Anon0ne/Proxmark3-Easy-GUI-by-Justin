@@ -28,3 +28,10 @@ Proxmark3Suite/verify_lab_backup.py
 Proxmark3Suite/build-ui.log
 Proxmark3Suite/dist-*/
 Proxmark3Suite/*-smoke/
+Proxmark3-Easy-GUI-*-Windows/
+
+.tools/
+release/
+
+/release05-smoke/
+/installed05-smoke/

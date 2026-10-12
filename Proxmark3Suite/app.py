@@ -6,17 +6,19 @@ from pathlib import Path
 import re
 import sys
 from datetime import datetime
+from time import monotonic
 from PySide6.QtCore import Qt, QProcess, QTimer, QSettings, QStandardPaths
-from PySide6.QtGui import QFont, QKeySequence, QShortcut, QTextCursor
+from PySide6.QtGui import QFont, QIcon, QKeySequence, QShortcut, QTextCursor
 from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,
     QTreeWidget,QTreeWidgetItem,QLineEdit,QPushButton,QPlainTextEdit,QLabel,QComboBox,
-    QFormLayout,QSplitter,QMessageBox,QFileDialog,QCheckBox,QTabWidget,QScrollArea,QHeaderView,QDialog,QTextBrowser)
+    QFormLayout,QSplitter,QMessageBox,QFileDialog,QCheckBox,QTabWidget,QScrollArea,QHeaderView,QDialog,QTextBrowser,QProgressBar,QGroupBox,QFrame)
 from eventlog import EventLogFormatter
+from launch_support import serial_ports
 from catalog import parse_dump, build_command, needs_confirmation, clean
 from backend import Session, resolve_client, client_environment, start_external
 from recovery import detect_classic,card_uid,recovery_command,card_summary
 
-VERSION = '0.3b'
+VERSION = '0.5b'
 TARGET = 'v4.21611-636-gda509461b'
 HELP_TOPICS = {
     'Getting started': '''# Getting started
@@ -55,14 +57,41 @@ The live console displays terminal redraws as separate lines and hides internal 
 Use the console export control to save displayed output. Session logs rotate automatically.
 Exact firmware help remains available in the command workbench.
 ''',
+    'Emulation and PC slots': '''# Emulation
+The Emulation tab has 16 persistent PC slots for Classic Mini/1K/2K/4K dumps.
+These slots are separate from the device's current emulator buffer.
+
+Import and name a dump. Inspect all blocks, rename, export or clear its slot.
+Read device memory to match it against saved slots, or capture it into a slot.
+Choose the correct memory format; the default is Classic 1K.
+
+Loading requires confirmation and verifies device read-back against the saved hash.
+Simulation requires separate confirmation and another read-back check.
+Use Stop simulation before other tasks. If the client disconnects, the physical PM3 button can stop RF simulation.
+
+Flash-backed standalone multi-slot support requires suitable hardware and firmware.
+This GUI does not assume it is available on a Generic Easy.
+''',
 }
 STYLE = '''
 QWidget {background:#0f141a;color:#e8edf2;font-family:"Segoe UI";font-size:12pt;}
 QLabel#title {font-size:22pt;font-weight:600;} QLabel#muted {color:#aab8c7;}
+QGroupBox {border:1px solid #2a3c4a;border-radius:10px;margin-top:14px;padding:16px;background:#131e28;}
+QGroupBox::title {subcontrol-origin:margin;left:16px;padding:0 6px;color:#b6c8d7;}
+QGroupBox QLabel,QGroupBox QCheckBox {background:transparent;}
+QProgressBar {background:#223442;border:0;border-radius:4px;min-height:8px;max-height:8px;}
+QProgressBar::chunk {background:#2dd4bf;border-radius:4px;}
+QScrollBar:vertical {background:#131e28;width:10px;margin:0;}
+QScrollBar::handle:vertical {background:#3c5264;min-height:28px;border-radius:4px;}
+QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical {height:0;}
+QScrollBar::add-page:vertical,QScrollBar::sub-page:vertical {background:transparent;}
+QMenuBar {background:#0f141a;} QMenuBar::item:selected {background:#304a5c;}
+QMenu {background:#17222e;border:1px solid #334656;} QMenu::item:selected {background:#206459;}
 QLineEdit,QPlainTextEdit,QTreeWidget,QComboBox {background:#111b25;border:1px solid #334656;border-radius:6px;padding:7px;selection-background-color:#206459;}
 QPushButton {background:#223442;border:1px solid #3c5264;border-radius:6px;padding:9px 15px;}
 QPushButton:hover {background:#304a5c;} QPushButton:disabled {color:#82909c;background:#18222c;}
 QPushButton#primary {background:#2dd4bf;color:#042f2a;font-weight:600;border:0;}
+QPushButton#primary:disabled {background:#1c4948;color:#85aaa7;}
 QPushButton#danger {color:#ffaaa1;border-color:#a45550;}
 QTabBar::tab {padding:10px 18px;background:#17222e;border-bottom:2px solid #17222e;}
 QTabBar::tab:selected {border-bottom:2px solid #2dd4bf;color:#75eedb;}
@@ -87,7 +116,9 @@ class Window(QMainWindow):
     def __init__(self, data_dir=None, settings=None, auto_discover=True):
         super().__init__()
         self.setWindowTitle(f'Proxmark3 Engineering Suite {VERSION}')
+        self.setWindowIcon(QIcon(str(Path(__file__).resolve().parent / 'assets' / 'app-icon.ico')))
         self.resize(1280, 850)
+        self.setMinimumSize(980,720)
         self.settings = settings or QSettings('Anon0ne', 'Proxmark3EngineeringSuite')
         self.data_dir = Path(data_dir or QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation))
         self.data_dir.mkdir(parents=True, exist_ok=True)
@@ -104,12 +135,17 @@ class Window(QMainWindow):
         self.recovery_card = None
         self.pending_recovery = None
         self.approved_recovery = None
+        self.approved_emulator = None
         self.recovery_running = False
         self.recovery_timeout_index = None
         self.last_recovery_offer = None
         self.pending_info = None
         self.info_verified_uid = None
         self.current_uid = None
+        self.current_observations = {}
+        self.workflow_prompt = False
+        self.workflow_stage = 'idle'
+        self.workflow_started = None
         try:
             self.card_records = json.loads((self.data_dir/'cards.json').read_text(encoding='utf-8'))
             if not isinstance(self.card_records,dict): self.card_records = {}
@@ -134,9 +170,11 @@ class Window(QMainWindow):
         self.poll.timeout.connect(self.identify)
         base = QWidget(); self.setCentralWidget(base)
         layout = QVBoxLayout(base); layout.setContentsMargins(24,18,24,18); layout.setSpacing(12)
-        title = QLabel('PROXMARK3  /  ENGINEERING SUITE'); title.setObjectName('title')
-        layout.addWidget(title)
-        subtitle = QLabel('Firmware-native tools · Proxmark3 Easy · Windows workbench'); subtitle.setObjectName('muted')
+        title = QLabel('PROXMARK3'); title.setObjectName('title')
+        header = QHBoxLayout(); header.addWidget(title); header.addStretch()
+        version = QLabel('ENGINEERING SUITE  /  '+VERSION); version.setObjectName('muted'); header.addWidget(version)
+        layout.addLayout(header)
+        subtitle = QLabel('Connect your reader. Present a card. Follow the next step.'); subtitle.setObjectName('muted')
         layout.addWidget(subtitle)
         self.badge = QLabel('●  DISCONNECTED'); self.compat = QLabel('Compatibility: not verified')
         layout.addLayout(row(self.badge, self.compat))
@@ -146,13 +184,19 @@ class Window(QMainWindow):
         self.offline = QCheckBox('Offline tools')
         setup = QWidget(); setup_layout = QVBoxLayout(setup)
         setup_layout.addWidget(QLabel('Connection settings and command catalog'))
+        setup_help = QLabel('Choose the installed Iceman client and your reader port. The EXE includes its GUI dependencies; the external Proxmark3 client is required.')
+        setup_help.setWordWrap(True); setup_layout.addWidget(setup_help)
         setup_layout.addLayout(row(QLabel('Client'),self.launcher,self.button('Browse…',self.browse)))
-        setup_layout.addLayout(row(QLabel('Port'),self.port,self.offline))
-        self.connect_button = self.button('Connect',self.connect_client,primary=True)
+        setup_layout.addLayout(row(QLabel('Port'),self.port,self.button('Refresh ports',self.refresh_ports),self.offline))
+        self.refresh_ports()
+        self.connect_button = self.button('Connect & verify',self.connect_client,primary=True)
         self.discover_button = self.button('Refresh command catalog',self.discover)
         self.timeout = QComboBox(); self.timeout.addItems(['3 minutes','10 minutes','30 minutes']); self.timeout.setToolTip('Client command timeout. Long recovery operations may need more time.')
         self.timeout.currentIndexChanged.connect(lambda index: setattr(self.session,'command_timeout_ms',[180000,600000,1800000][index]))
-        layout.addLayout(row(self.connect_button,self.button('Disconnect / Stop',self.stop,danger=True)))
+        self.stop_button = self.button('Disconnect / Stop',self.stop,danger=True)
+        connection = QHBoxLayout(); connection.addWidget(self.connect_button); connection.addWidget(self.stop_button); connection.addStretch()
+        settings_button = self.button('Connection settings',lambda: self.tabs.setCurrentWidget(setup)); connection.addWidget(settings_button)
+        layout.addLayout(connection)
         setup_layout.addLayout(row(self.discover_button,QLabel('Command timeout'),self.timeout))
         setup_layout.addStretch()
         self.tabs = QTabWidget(); layout.addWidget(self.tabs,1)
@@ -179,41 +223,70 @@ class Window(QMainWindow):
         rv.addLayout(row(self.run_button,self.button('Copy command',lambda: QApplication.clipboard().setText(self.preview.text()))))
         self.help = QPlainTextEdit(); self.help.setReadOnly(True); self.help.setMinimumHeight(110); self.help.setPlaceholderText('Exact installed-client usage, options and examples.'); rv.addWidget(self.help,2)
         workbench.addWidget(right); workbench.setSizes([440,920])
-        cards = QWidget(); cv = QVBoxLayout(cards)
-        intro = QLabel('1. Identify a card    →    2. Collect information    →    3. Review recovery'); intro.setWordWrap(True); cv.addWidget(intro)
-        self.auto_detect = QCheckBox('Search automatically every 6 seconds while idle'); self.auto_detect.toggled.connect(self.toggle_auto)
-        cv.addLayout(row(self.button('Identify LF + HF',self.identify,primary=True),self.auto_detect))
-        self.current_card = QPlainTextEdit(); self.current_card.setReadOnly(True); self.current_card.setMaximumHeight(180)
+        cards = QWidget(); cv = QVBoxLayout(cards); cv.setSpacing(16)
+        self.workflow_steps = []
+        steps = QHBoxLayout()
+        for label in ['01  IDENTIFY','02  INSPECT','03  RECOVER','04  RESULTS']:
+            widget = QLabel(label); self.workflow_steps.append(widget); steps.addWidget(widget)
+        cv.addLayout(steps)
+        self.workflow_progress = QProgressBar(); self.workflow_progress.setTextVisible(False); self.workflow_progress.setAccessibleName('Card workflow activity')
+        cv.addWidget(self.workflow_progress)
+        panes = QHBoxLayout(); panes.setSpacing(16); cv.addLayout(panes,1)
+        about = QGroupBox('Current card'); about_layout = QVBoxLayout(about)
+        self.card_identity = QLabel('No card identified'); self.card_identity.setStyleSheet('font-size:18pt;font-weight:600;background:transparent;')
+        self.card_presence = QLabel('Place one card on the antenna, then identify it.'); self.card_presence.setWordWrap(True); self.card_presence.setObjectName('muted')
+        about_layout.addWidget(self.card_identity); about_layout.addWidget(self.card_presence)
+        action_panel = QGroupBox('Next step'); actions = QVBoxLayout(action_panel); actions.setSpacing(14)
+        self.workflow_message = QLabel('Connect and verify your reader to begin.'); self.workflow_message.setWordWrap(True); actions.addWidget(self.workflow_message)
+        self.workflow_elapsed = QLabel(''); self.workflow_elapsed.setObjectName('muted'); actions.addWidget(self.workflow_elapsed)
+        action_scroll = QScrollArea(); action_scroll.setWidgetResizable(True); action_scroll.setFrameShape(QFrame.NoFrame)
+        action_scroll.setWidget(action_panel); action_panel.setMinimumHeight(440)
+        panes.addWidget(about,3); panes.addWidget(action_scroll,2)
+        self.auto_detect = QCheckBox('Search while idle'); self.auto_detect.setToolTip('Identify LF and HF every six seconds while no operation is running.'); self.auto_detect.toggled.connect(self.toggle_auto)
+        self.identify_button = self.button('Identify card',self.identify,primary=True)
+        self.identify_button.setMinimumHeight(40)
+        actions.addWidget(self.identify_button)
+        actions.addWidget(self.auto_detect)
+        self.current_card = QPlainTextEdit(); self.current_card.setReadOnly(True); self.current_card.setFrameStyle(0); self.current_card.setMinimumHeight(180)
         self.current_card.setPlaceholderText('About current card — detected identity and recommended checks appear here.')
-        cv.addWidget(QLabel('ABOUT CURRENT CARD'))
-        cv.addWidget(self.current_card)
-        cv.addLayout(row(self.button('Saved cards…',self.show_saved_cards)))
-        self.offer_auto_recovery = QCheckBox('Offer recommended checks when a MIFARE Classic card is detected')
+        about_layout.addWidget(self.current_card,1)
+        about_layout.addWidget(self.button('Saved cards…',self.show_saved_cards))
+        self.offer_auto_recovery = QCheckBox('Offer card information checks')
+        self.offer_auto_recovery.setToolTip('Ask about read-only information commands when a new Classic card is identified. Recovery always requires separate confirmation.')
         self.offer_auto_recovery.setChecked(True)
         self.recovery_status = QLabel('Auto Recovery: waiting for a supported card. Success is not guaranteed.')
         self.recovery_status.setWordWrap(True)
         self.recovery_button = self.button('Next recommended step',self.review_recovery,primary=True)
-        cv.addWidget(self.offer_auto_recovery); cv.addLayout(row(self.recovery_status,self.recovery_button))
+        self.recovery_button.setMinimumHeight(40)
+        actions.addWidget(self.recovery_button)
+        actions.addWidget(self.recovery_status)
+        actions.addStretch()
+        actions.addWidget(self.offer_auto_recovery)
         details = QCheckBox('Show card activity details')
         self.card_output = QPlainTextEdit(); self.card_output.setReadOnly(True); self.card_output.setMaximumBlockCount(3000)
         self.card_output.hide(); details.toggled.connect(self.card_output.setVisible)
-        cv.addWidget(details); cv.addWidget(self.card_output); cv.addStretch()
+        cv.addWidget(details); cv.addWidget(self.card_output)
         self.tabs.insertTab(0,cards,'Cards'); self.tabs.setCurrentWidget(cards)
         hardware = QWidget(); hv = QVBoxLayout(hardware)
         self.target_label = QLabel('Target: Iceman/RRG '+self.expected+' · PM3 GENERIC / Easy'); hv.addWidget(self.target_label)
         note = QLabel('Card workflows require matching client/device revisions and a verified generic board.'); note.setWordWrap(True); hv.addWidget(note)
-        hv.addWidget(self.button('Verify hardware',self.diagnostics,primary=True))
+        self.diagnostics_button = self.button('Verify hardware',self.diagnostics,primary=True); hv.addWidget(self.diagnostics_button)
         self.hardware_output = QPlainTextEdit(); self.hardware_output.setReadOnly(True); hv.addWidget(self.hardware_output)
         self.tabs.addTab(hardware,'Hardware & compatibility')
         from firmware import FirmwarePanel
         self.firmware = FirmwarePanel(self); self.tabs.addTab(self.firmware,'Firmware updates')
+        from emulation import EmulationPanel
+        self.emulation = EmulationPanel(self); self.tabs.insertTab(1,self.emulation,'Emulation')
         self.history = QComboBox(); self.history.setEditable(True); self.history.addItems(self.history_items); self.history.setCurrentText(''); self.history.setMinimumWidth(300)
         console_page = QWidget(); console_layout = QVBoxLayout(console_page)
-        console_layout.addLayout(row(self.history,self.button('Send',self.send_console),self.button('Export log…',self.export),self.button('Clear view',lambda: self.console.clear())))
+        self.send_button = self.button('Send',self.send_console)
+        console_layout.addLayout(row(self.history,self.send_button,self.button('Export log…',self.export),self.button('Clear view',lambda: self.console.clear())))
         self.console = QPlainTextEdit(); self.console.setReadOnly(True); self.console.setMaximumBlockCount(5000); self.console.setFont(QFont('Consolas',11)); console_layout.addWidget(self.console)
         self.tabs.addTab(console_page,'Console')
         self.tabs.addTab(setup,'Settings')
         self.setStyleSheet(STYLE)
+        self.elapsed_timer = QTimer(self); self.elapsed_timer.setInterval(1000); self.elapsed_timer.timeout.connect(self.update_elapsed)
+        self.set_workflow('idle','Connect and verify your reader to begin.')
         QShortcut(QKeySequence('Ctrl+K'),self,activated=self.search.setFocus)
         QShortcut(QKeySequence('Ctrl+Return'),self,activated=self.execute)
         self.launcher.textEdited.connect(self.invalidate)
@@ -257,10 +330,13 @@ class Window(QMainWindow):
         dialog.exec()
 
     def failure(self,message):
+        if hasattr(self,'emulation'):
+            self.emulation.invalidate('Client failed. Device memory is unverified; if simulating, press the PM3 button to stop it.')
         self.pending_info = None; self.info_verified_uid = None
         self.finish_recovery('Auto Recovery stopped: '+message)
         self.queue.clear(); self.compatible = False; self.poll.stop(); self.auto_detect.setChecked(False)
         self.console_text('\n[ERROR] '+message+'\n'); self.statusBar().showMessage(message); self.update_controls()
+        self.set_workflow('failed',message)
 
     def browse(self):
         path,_ = QFileDialog.getOpenFileName(self,'Select launcher / client','','Client (*.bat *.exe)')
@@ -348,37 +424,107 @@ class Window(QMainWindow):
             self.settings.setValue('favorites',json.dumps(sorted(self.favorites))); self.populate()
 
     def connect_client(self):
+        if self.session.process.state() != QProcess.NotRunning:
+            self.statusBar().showMessage('Reader client is already running. Disconnect before reconnecting.'); return
+        if self.workflow_busy():
+            self.statusBar().showMessage('Finish or stop the current card workflow before reconnecting.'); return
+        if not self.catalog_verified or not self.client_version:
+            self.reconnect_after_discovery = True; self.discover(); return
         try:
             if self.firmware.busy: raise ValueError('Wait for the firmware operation to finish.')
-            if self.pending_info and not internal: raise ValueError('Wait for the card information checks to finish.')
             exe = resolve_client(self.launcher.text()); self.compatible = False; self.device_version = ''; self.queue.clear()
             self.recovery_card = None; self.last_recovery_offer = None
             self.session_path = self.launcher.text(); self.session_port = self.port.currentText(); self.session_offline = self.offline.isChecked()
             self.session.start(exe,self.session_port,self.data_dir,self.session_offline,self.runtime_bin)
             if not self.session_offline: self.queue = ['hw version','hw status']
             self.settings.setValue('launcher',self.launcher.text()); self.settings.setValue('port',self.port.currentText())
+            self.set_workflow('connecting','Connecting and checking the reader firmware…',True)
         except ValueError as error: self.failure(str(error))
+
+    def refresh_ports(self):
+        selected = self.port.currentText()
+        ports = serial_ports()
+        self.port.blockSignals(True); self.port.clear()
+        self.port.addItems(list(dict.fromkeys([selected]+ports))); self.port.setCurrentText(selected)
+        self.port.blockSignals(False)
+        self.port.setToolTip('Detected ports: '+(', '.join(ports) or 'none. Connect USB and refresh; a port can also be entered manually.'))
 
     def session_state(self,state):
         self.badge.setText('●  '+state.upper())
         if state == 'Disconnected': self.compatible = False; self.poll.stop(); self.auto_detect.setChecked(False)
         if state == 'Disconnected':
+            if hasattr(self,'emulation'):
+                self.emulation.invalidate('Disconnected: device memory is unverified. Press the PM3 button if simulation was running.')
             self.pending_info = None; self.info_verified_uid = None
             self.finish_recovery('Auto Recovery stopped: client disconnected.')
             self.recovery_card = None; self.last_recovery_offer = None
+            self.clear_present_card()
+            if self.workflow_stage != 'failed': self.set_workflow('idle','Reader disconnected. Connect to begin.')
         self.update_controls()
         if state == 'Ready': QTimer.singleShot(0,self.next_command)
 
     def update_controls(self):
         ready = self.session.ready
-        self.run_button.setEnabled(ready and self.catalog_verified)
-        self.connect_button.setEnabled(self.session.process.state() == QProcess.NotRunning)
+        unlocked = not self.workflow_busy() and not self.firmware.busy
+        self.run_button.setEnabled(ready and self.catalog_verified and unlocked)
+        self.send_button.setEnabled(ready and self.catalog_verified and unlocked)
+        self.connect_button.setEnabled(self.session.process.state() == QProcess.NotRunning and unlocked)
         # Keep the running toggle operable while the client is busy.
-        self.auto_detect.setEnabled(self.compatible)
-        self.recovery_button.setEnabled(ready and self.compatible and self.recovery_card is not None and not self.recovery_running and self.pending_recovery is None)
+        self.auto_detect.setEnabled(self.compatible and unlocked)
+        self.identify_button.setEnabled(ready and self.compatible and unlocked and not self.queue)
+        self.diagnostics_button.setEnabled(ready and unlocked and not self.queue)
+        self.recovery_button.setEnabled(ready and self.compatible and self.recovery_card is not None and unlocked and not self.queue)
+        self.recovery_button.setVisible(self.recovery_card is not None)
+        self.identify_button.setText('Identify another card' if self.recovery_card else 'Identify card')
+        identity_style = '' if self.recovery_card else 'primary'
+        if self.identify_button.objectName() != identity_style:
+            self.identify_button.setObjectName(identity_style)
+            self.identify_button.style().unpolish(self.identify_button); self.identify_button.style().polish(self.identify_button)
+        self.recovery_status.setVisible(self.recovery_card is not None or self.workflow_stage in {'complete','failed'})
+        self.recovery_button.setText('Review recovery effort' if self.recovery_card and self.info_verified_uid == self.recovery_card.uid else 'Collect card information')
+        for widget in [self.launcher,self.port,self.offline,self.timeout,self.discover_button]:
+            widget.setEnabled(unlocked and not self.session.active)
         self.compat.setText('Compatibility: MATCHED · PM3 GENERIC' if self.compatible else 'Compatibility: UNVERIFIED / MISMATCH · card workflows locked')
+        if hasattr(self,'emulation'): self.emulation.update_controls()
+
+    def workflow_busy(self):
+        emulator = getattr(self,'emulation',None)
+        return bool(self.pending_info or self.pending_recovery or self.recovery_running or self.workflow_prompt or self.workflow_stage == 'identifying' or emulator and (emulator.pending or emulator.simulating))
+
+    def set_workflow(self, stage, message, busy=False):
+        self.workflow_stage = stage
+        self.workflow_message.setText(message)
+        checkpoints = {'idle':0,'connecting':0,'identifying':0,'identified':1,'inspecting':1,'inspected':2,'verifying':2,'recovering':2,'complete':4,'failed':0}
+        value = checkpoints.get(stage,0)
+        self.workflow_progress.setRange(0,0 if busy else 4)
+        if not busy: self.workflow_progress.setValue(value)
+        for index, label in enumerate(self.workflow_steps):
+            active = index == min(value,3)
+            color = '#75eedb' if active or index < value else '#82909c'
+            label.setStyleSheet('color:'+color+';font-weight:'+('600' if active else '400')+';padding:8px 0;')
+        if busy:
+            self.workflow_started = monotonic(); self.elapsed_timer.start(); self.update_elapsed()
+        else:
+            self.workflow_started = None; self.elapsed_timer.stop(); self.workflow_elapsed.setText('')
+        self.update_controls()
+
+    def update_elapsed(self):
+        if self.workflow_started is None: return
+        seconds = int(monotonic()-self.workflow_started)
+        self.workflow_elapsed.setText(f'Elapsed {seconds//60:02d}:{seconds%60:02d} · waiting for client output')
+
+    def clear_present_card(self):
+        self.current_uid = None; self.current_observations = {}; self.info_verified_uid = None
+        self.current_card.clear(); self.card_identity.setText('No card identified')
+        self.card_presence.setText('Saved observations remain available in Saved cards.')
+
+    def ask_workflow(self, title, text):
+        self.workflow_prompt = True; self.update_controls()
+        try: return QMessageBox.question(self,title,text,QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        finally: self.workflow_prompt = False; self.update_controls()
 
     def diagnostics(self):
+        if self.workflow_busy(): self.statusBar().showMessage('Card workflow in progress.'); return
         if not self.session.ready: self.failure('Connect and wait for the client to become ready.'); return
         self.queue = ['hw version','hw status','hw ping']; self.next_command()
 
@@ -386,6 +532,11 @@ class Window(QMainWindow):
         if self.queue and self.session.ready: self.dispatch(self.queue.pop(0),internal=True)
 
     def dispatch(self,line,internal=False):
+        if not self.session.ready:
+            self.statusBar().showMessage('Connect the reader and wait for the current operation to finish.'); return
+        workflow_internal = internal and ((self.pending_info or self.pending_recovery) and line in {'hf 14a reader','hf mf info'} or self.workflow_stage == 'identifying' and line in {'lf search','hf search'})
+        if self.workflow_busy() and not workflow_internal and line not in {self.approved_recovery,self.approved_emulator}:
+            self.statusBar().showMessage('Wait for the card workflow to finish, or stop it first.'); return
         try:
             if self.firmware.busy: raise ValueError('Wait for the firmware operation to finish.')
             confirm = needs_confirmation(line)
@@ -398,15 +549,21 @@ class Window(QMainWindow):
             if not self.commands[name].offline and not self.compatible and line not in {'hw version','hw status','hw ping'}:
                 raise ValueError('Verify matching firmware and PM3 GENERIC hardware before device commands.')
             approved = line == self.approved_recovery and line.startswith('hf mf autopwn ')
+            emulator_approved = line == self.approved_emulator
             self.approved_recovery = None
-            if confirm and not approved:
+            self.approved_emulator = None
+            if confirm and not approved and not emulator_approved:
                 answer = QMessageBox.question(self,'Confirm command','Review the exact command:\n\n'+line+'\n\nThis command has not been classified as read-only. It may modify a card, device, or files. Execute on your authorized target?',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
                 if answer != QMessageBox.Yes: return
+            if not emulator_approved and (line.startswith(('hf mf e','hf mfu e','hf iclass e','hf mf sim','hf mf autopwn','hw reset')) or ' --emu' in line):
+                self.emulation.invalidate('Another command can change emulator memory. Read or reload the buffer before simulation.')
+            if line.startswith('hf mf autopwn'): self.emulation.clear_recovery_offer()
             self.session.send(line); self.console_text('\n> '+line+'\n')
             if not internal:
                 self.history_items = ([line]+[x for x in self.history_items if x != line])[:50]
                 self.history.clear(); self.history.addItems(self.history_items); self.history.setCurrentText('')
                 self.settings.setValue('history',json.dumps(self.history_items))
+            return True
         except ValueError as error: self.failure(str(error))
 
     def execute(self):
@@ -415,11 +572,14 @@ class Window(QMainWindow):
     def send_console(self): self.dispatch(self.history.currentText())
 
     def result(self,command,text):
+        self.emulation.completed(command,text)
         if command.startswith('hw '):
             self.hardware_output.appendPlainText('\n> '+command+'\n'+EventLogFormatter().feed(text+'\n'))
             if command == 'hw version': self.device_version = text
             if command == 'hw status': self.device_status = text
             self.check_compatibility()
+            if command == 'hw status' and self.compatible:
+                self.set_workflow('idle','Reader ready. Place one card on the antenna and select Identify card.')
         if command in {'lf search','hf search'}: self.card_output.appendPlainText(datetime.now().strftime('%H:%M:%S')+'  '+command+'\n'+EventLogFormatter().feed(text+'\n'))
         no_card = command in {'lf search','hf search'} and re.search(r"No known/supported|Couldn't identify a chipset",text,re.I)
         if no_card:
@@ -433,11 +593,17 @@ class Window(QMainWindow):
         if command in {'hf search','auto'}:
             self.recovery_card = detect_classic(text)
             if self.recovery_card:
+                self.set_workflow('identified','Card identified. Collect its information before reviewing recovery.')
                 self.recovery_status.setText('MIFARE Classic '+self.recovery_card.size.upper()+' · UID '+self.recovery_card.uid+' · review recommended information checks')
                 if self.offer_auto_recovery.isChecked() and self.recovery_card != self.last_recovery_offer:
                     self.last_recovery_offer = self.recovery_card
                     QTimer.singleShot(0,self.review_information)
             else:
+                if card_uid(text):
+                    self.set_workflow('identified','Card identified. This technology needs its own commands in the workbench; Classic recovery is unavailable.')
+                else:
+                    self.clear_present_card()
+                    self.set_workflow('idle','No card identified. Reposition the card and identify again.')
                 self.info_verified_uid = None
                 self.last_recovery_offer = None
                 self.recovery_status.setText('No unambiguous MIFARE Classic card identified. Other technologies require their own documented workflow.')
@@ -446,6 +612,7 @@ class Window(QMainWindow):
             if card_uid(text) != self.pending_info.uid:
                 self.pending_info = None
                 self.recovery_status.setText('Information checks canceled: card missing or UID changed.')
+                self.set_workflow('failed','Card changed or is missing. Identify the intended card again.')
             else:
                 self.dispatch('hf mf info',internal=True)
             return
@@ -453,9 +620,11 @@ class Window(QMainWindow):
             card = self.pending_info; self.pending_info = None
             if card_uid(text) != card.uid or re.search(r'no tag|auth error|can.t select|failed|communication error',text,re.I):
                 self.recovery_status.setText('Information checks incomplete. Reposition the card and retry before recovery.')
+                self.set_workflow('failed','Information checks failed. Reposition the card and retry.')
                 return
             self.info_verified_uid = card.uid
             self.recovery_status.setText('Information checks saved. Review current card details before Auto Recovery.')
+            self.set_workflow('inspected','Card information collected. Review the recovery effort when ready.')
             QTimer.singleShot(0,self.review_recovery)
             return
         if command == 'hf 14a reader' and self.pending_recovery:
@@ -469,13 +638,20 @@ class Window(QMainWindow):
             self.recovery_timeout_index = self.timeout.currentIndex()
             self.timeout.setCurrentIndex(2)
             self.recovery_status.setText('Auto Recovery running · 30-minute timeout · keep the same card on the antenna')
+            self.set_workflow('recovering','Recovery in progress. Keep the same card still on the antenna.',True)
             self.dispatch(line)
         elif command.startswith('hf mf autopwn') and self.recovery_running:
             self.card_output.appendPlainText('\nAUTO RECOVERY RESULT\n'+EventLogFormatter().feed(text+'\n'))
             self.finish_recovery('Auto Recovery finished. Review the client output for recovered keys, partial results and saved dumps; completion alone is not proof of success.')
+            if re.search(r'no tag|communication error|no usable key|no keys found|aborted|failed',text,re.I):
+                self.set_workflow('failed','Recovery did not complete successfully. Open Console for details, reposition the card, then retry.')
+            else:
+                self.set_workflow('complete','Recovery command finished. Review keys and saved files in Console; completion alone does not prove a complete backup.')
+                if self.emulation.offer_recovered(text,self.recovery_card):
+                    QTimer.singleShot(0,self.emulation.offer_save_recovery)
 
     def review_recovery(self):
-        if not self.session.ready or self.queue or not self.compatible or not self.catalog_verified or self.pending_recovery or self.recovery_running: return
+        if not self.session.ready or self.queue or not self.compatible or not self.catalog_verified or self.workflow_busy(): return
         card = self.recovery_card
         if not card: return
         if self.info_verified_uid != card.uid:
@@ -485,24 +661,31 @@ class Window(QMainWindow):
             self.recovery_status.setText(str(error)); return
         resume_scan = self.auto_detect.isChecked()
         self.poll.stop(); self.auto_detect.setChecked(False)
-        answer = QMessageBox.question(self,'Auto Recovery effort?','Detected MIFARE Classic '+card.size.upper()+'\nUID: '+card.uid+'\n\nAttempt key recovery and a backup on a card you own or are authorized to assess?\n\n'+line+'\n\nThe client checks keys and selects supported recovery techniques. It can take many minutes and may fail or recover only some keys. It may save sensitive keys/dumps and fill device emulator memory. No card write or cloning command is queued.\n\nThe UID will be checked again before starting. Keep the same card on the antenna. Start this effort?',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        answer = self.ask_workflow('Review recovery effort','MIFARE Classic '+card.size.upper()+' · UID '+card.uid+'\n\nAttempt recovery on your own or authorized card?\n\n'+line+'\n\nThis may take many minutes, save sensitive keys/dumps and change emulator memory. It can fail or recover only some keys. No card write is queued.\n\nThe UID is checked again before starting. Keep the same card on the antenna.')
         if answer != QMessageBox.Yes:
             if resume_scan and self.compatible and self.session.ready: self.auto_detect.setChecked(True)
             return
         self.poll.stop(); self.auto_detect.setChecked(False); self.queue.clear()
         self.pending_recovery = (card,line)
         self.recovery_status.setText('Verifying the same card before recovery…')
+        self.set_workflow('verifying','Checking card identity before starting recovery…',True)
         self.dispatch('hf 14a reader',internal=True)
 
     def record_card(self, command, text):
         uid = card_uid(text)
         if not uid: return
-        if self.current_uid != uid: self.info_verified_uid = None
+        if self.current_uid != uid:
+            self.info_verified_uid = None; self.current_observations = {}
         self.current_uid = uid
         record = self.card_records.setdefault(uid, {'uid':uid,'observations':{}})
         record['last_seen'] = datetime.now().isoformat(timespec='seconds')
         record['observations'][command] = EventLogFormatter().feed(text+'\n')
-        self.current_card.setPlainText(card_summary(uid,record['observations']))
+        self.current_observations[command] = record['observations'][command]
+        summary = card_summary(uid,self.current_observations)
+        self.current_card.setPlainText('\n'.join(summary.splitlines()[1:]))
+        self.card_identity.setText(uid)
+        card = detect_classic(text)
+        self.card_presence.setText('MIFARE Classic '+card.size.upper()+' · detected this session' if card else 'Card observed this session · information below')
         try:
             path = self.data_dir/'cards.json'; temporary = path.with_suffix('.tmp')
             temporary.write_text(json.dumps(self.card_records,indent=2),encoding='utf-8'); temporary.replace(path)
@@ -515,19 +698,20 @@ class Window(QMainWindow):
         layout.addWidget(view); layout.addWidget(self.button('Close',dialog.accept)); dialog.exec()
 
     def review_information(self):
-        if not self.session.ready or self.queue or not self.compatible or not self.catalog_verified or self.pending_info or self.pending_recovery or self.recovery_running: return
+        if not self.session.ready or self.queue or not self.compatible or not self.catalog_verified or self.workflow_busy(): return
         card = self.recovery_card
         if not card:
             self.recovery_status.setText('Identify a MIFARE Classic card first. Other card technologies need their own information commands.'); return
         if any(command not in self.commands for command in ['hf 14a reader','hf mf info']):
             self.recovery_status.setText('Installed client lacks the recommended information commands.'); return
         resume_scan = self.auto_detect.isChecked(); self.poll.stop(); self.auto_detect.setChecked(False)
-        answer = QMessageBox.question(self,'Recommended card information','UID: '+card.uid+'\n\nRun these read-only checks and save their results?\n\nhf 14a reader\nhf mf info\n\nThey verify identity and report available keys, fingerprint, magic capabilities and nonce properties. Some details require valid keys. Recovery will be offered separately after successful checks.',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
+        answer = self.ask_workflow('Collect card information','UID: '+card.uid+'\n\nRun and save these read-only checks?\n\nhf 14a reader\nhf mf info\n\nThey report identity, available keys, fingerprint, magic support and nonce properties. Some details require valid keys. Recovery requires a separate confirmation.')
         if answer != QMessageBox.Yes:
             if resume_scan and self.compatible and self.session.ready: self.auto_detect.setChecked(True)
             return
         self.info_verified_uid = None; self.pending_info = card
         self.recovery_status.setText('Collecting recommended card information…')
+        self.set_workflow('inspecting','Collecting card information. Keep the card in place.',True)
         self.dispatch('hf 14a reader',internal=True)
 
     def finish_recovery(self,message):
@@ -537,7 +721,9 @@ class Window(QMainWindow):
         if self.recovery_timeout_index is not None:
             self.timeout.setCurrentIndex(self.recovery_timeout_index)
             self.recovery_timeout_index = None
-        if active: self.recovery_status.setText(message)
+        if active:
+            self.recovery_status.setText(message)
+            if re.search(r'canceled|stopped',message,re.I): self.set_workflow('failed',message)
         if hasattr(self,'recovery_button'): self.update_controls()
 
     def check_compatibility(self):
@@ -553,10 +739,15 @@ class Window(QMainWindow):
         else: self.poll.stop()
 
     def identify(self):
+        if self.workflow_busy(): self.statusBar().showMessage('Finish or stop the current card workflow first.'); return
         if not self.compatible: self.statusBar().showMessage('Card identification requires verified firmware compatibility.'); return
-        if self.session.ready and not self.queue: self.queue = ['lf search','hf search']; self.next_command()
+        if self.session.ready and not self.queue:
+            self.set_workflow('identifying','Searching LF and HF for a card…',True)
+            self.queue = ['lf search','hf search']; self.next_command()
 
     def stop(self):
+        if self.emulation.simulating and self.session.ready:
+            self.emulation.stop_simulation(); return
         if self.session.active and needs_confirmation(self.session.active):
             answer = QMessageBox.question(self,'Interrupt operation?','This command may modify the card or device. Interrupting it cannot undo changes already sent.\n\n'+self.session.active+'\n\nStop the client?',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
             if answer != QMessageBox.Yes: return
@@ -569,6 +760,10 @@ class Window(QMainWindow):
             except OSError as error: self.failure(str(error))
 
     def closeEvent(self,event):
+        if hasattr(self,'emulation') and self.emulation.simulating and self.session.ready:
+            self.emulation.stop_simulation()
+            self.statusBar().showMessage('Stopping simulation. Close again after the break command finishes.')
+            event.ignore(); return
         if self.firmware.busy:
             QMessageBox.warning(self,'Firmware operation active','Wait for the firmware operation to finish before closing.'); event.ignore(); return
         if self.session.active and needs_confirmation(self.session.active):

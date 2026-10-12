@@ -9,6 +9,8 @@ session = Session()
 hardware = '--hardware' in sys.argv
 queue = ['hw version','hw status','hw ping'] if hardware else ['prefs show','hw version']
 if '--identify' in sys.argv and hardware: queue += ['lf search','hf search']
+if '--emulator' in sys.argv and hardware: queue += ['hf mf eview --1k']
+if '--capture-emulator' in sys.argv and hardware: queue += ['hf mf esave --1k -f lab-device-emulator-capture']
 expected_count = len(queue)
 results = []
 session.output.connect(lambda text: print(text,end='',flush=True))

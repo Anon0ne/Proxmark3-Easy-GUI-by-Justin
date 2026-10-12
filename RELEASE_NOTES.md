@@ -1,23 +1,19 @@
-# 0.3b â€” Windows beta
+# 0.5b — Windows beta
 
-The main screen now follows one card workflow: identify, collect information, then review recovery. Connection settings, the command workbench, hardware diagnostics, firmware updates and the console have dedicated tabs. Card activity details are hidden until requested.
+A guided card workflow now presents identification, information checks and separately confirmed recovery. The Emulation tab manages sixteen persistent PC slots and the device’s single emulator buffer, with integrity checks and explicit load/simulation approvals.
 
 ## Included
 
-- Persistent Windows Iceman client with firmware compatibility gates.
-- Searchable firmware-native catalog and argument forms; the verified target exposes 989 commands.
-- Compact current-card facts and persistent local saved-card history.
-- Confirmed read-only UID and Classic information checks before a separate autopwn confirmation.
-- Readable terminal progress lines, log export and top Help menu.
-- Latest/tag firmware workspace with guarded flashing and matching client selection.
-- Source installer checks Python, installs dependencies, runs tests, builds an EXE and creates a shortcut.
+- Original NFC card icon embedded in the application, EXE, Setup installer and shortcuts.
+- Per-user Windows Setup installer with Desktop/Start menu shortcuts, stable upgrade location and uninstall support. Python is bundled; the external Iceman client is required.
+- Persistent client, searchable firmware-derived command forms, console, readable logs and operation locks.
+- Activity bar, elapsed time, compact card facts, saved observations and top Help menu.
+- Slot import/export, recovered-dump saving, read-only emulator inspection/capture, confirmed load with readback, separately confirmed simulation and stop control.
+- Latest/tag firmware workspace with matching client selection and guarded flashing.
 
 ## Verification and limits
 
-27 automated tests pass. The beta EXE startup and installed-client catalog are checked without serial access.
+48 automated tests pass. See VERIFICATION.md for installer and packaged startup checks.
+Earlier physical COM18 testing verified PM3 GENERIC / 512 KB with matching target firmware, card identification and two matching authenticated backups. Read-only device emulator viewing/capture and matching captures to PC slots were verified. No successful physical autopwn recovery, card writing, device emulator loading, RF simulation/reader interaction or firmware flashing is claimed.
 
-Earlier physical COM18 testing verified matching target firmware, PM3 GENERIC / 512 KB, a Gen 1a Fudan card and two identical 1024-byte authenticated backups. Backdoor reads failed twice; authenticated reads succeeded with retries. The revised GUI workflow has not been exercised end to end on hardware. No successful physical autopwn recovery, card writes or firmware flashing is claimed.
-
-Latest firmware compilation/flashing, Python-missing installation and clean-machine installation remain unverified. The EXE is unsigned and requires a compatible external Iceman client. Recovery may fail or be partial; review output and saved files.
-
-The previously published 0.1b prerelease is retained.
+The EXE and installer are unsigned. Clean-machine installation, Python-missing source setup and latest firmware compilation/flashing remain unverified. This is a beta release. Previous releases remain available on GitHub. Private captures, logs, card dumps, reference UI and build toolchain are excluded.
