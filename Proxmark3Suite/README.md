@@ -4,13 +4,13 @@ Windows beta of the Engineering Suite workbench, built from the v0.1.0 scaffold.
 
 Version 0.5b opens on Cards. Identify a card, approve its information checks, then review a separate Auto Recovery confirmation. One Next recommended step button follows this flow. Saved cards retain compact facts; raw output is available in Console and optional card activity details. Connection configuration is in Settings; hardware verification is in Hardware & compatibility. See [workflow research and test-card plan](AUTO_RECOVERY.md). No successful physical recovery or card write has been verified.
 
-The current development preview adds a four-stage activity bar, elapsed time, action labels that follow the workflow, operation locking and a simpler card panel. It fixes the pending-information reconnect exception. Current observations clear when the card disappears; saved history remains separate.
+This beta includes a four-stage activity bar, elapsed time, action labels that follow the workflow, operation locking and a simpler card panel. It fixes the pending-information reconnect exception. Current observations clear when the card disappears; saved history remains separate.
 
 The Emulation tab adds 16 persistent PC slots for Classic Mini/1K/2K/4K dumps, block inspection, import/export, current device memory reading/capture, confirmed load with hash read-back, and separately confirmed simulation. See [emulation details and hardware limits](EMULATION.md). Device memory is distinct from PC slots and no flash-backed standalone support is assumed.
 
 ## Run the Windows package
 
-Extract the Windows ZIP and run Proxmark3Suite.exe or Start.bat. Python is not required for this package. Install.bat optionally installs the EXE for the current user and creates a Desktop shortcut. The compatible external Iceman client is still required; Settings can refresh detected COM ports. Connect & verify automatically discovers client commands and verifies the hardware. This preview is not yet an official 0.5 release.
+Run the release Setup.exe to install for your Windows account with Desktop and Start menu shortcuts, or extract the Windows ZIP and run Proxmark3Suite.exe or Start.bat. Python is not required. The portable package's Install.bat optionally copies the EXE and creates a shortcut; use Setup.exe for Windows uninstall support. The compatible external Iceman client is still required; Settings can refresh detected COM ports. Connect & verify automatically discovers client commands and verifies the hardware. This is the published 0.5b beta. See the [homepage usage guide](../README.md) for everyday workflows.
 
 ## Launch
 
