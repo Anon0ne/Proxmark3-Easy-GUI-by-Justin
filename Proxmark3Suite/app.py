@@ -16,9 +16,9 @@ from eventlog import EventLogFormatter
 from launch_support import serial_ports,client_candidates,default_client,default_port
 from catalog import parse_dump, build_command, needs_confirmation, clean
 from backend import Session, resolve_client, client_environment, start_external
-from recovery import detect_classic,card_uid,recovery_command,card_summary
+from recovery import detect_classic,card_uid,recovery_command,card_summary,recovery_sectors
 
-VERSION = '0.6b'
+VERSION = '0.7-dev'
 TARGET = 'v4.21611-636-gda509461b'
 HELP_TOPICS = {
     'Getting started': '''# Getting started
@@ -136,6 +136,7 @@ class Window(QMainWindow):
         self.pending_recovery = None
         self.approved_recovery = None
         self.approved_emulator = None
+        self.approved_card_read = None
         self.recovery_running = False
         self.recovery_timeout_index = None
         self.last_recovery_offer = None
@@ -341,6 +342,7 @@ class Window(QMainWindow):
         dialog.exec()
 
     def failure(self,message):
+        if hasattr(self,'card_data'): self.card_data.reads.abort('Read capture interrupted: '+message)
         if hasattr(self,'emulation'):
             self.emulation.invalidate('Client failed. Device memory is unverified; if simulating, press the PM3 button to stop it.')
         self.pending_info = None; self.info_verified_uid = None
@@ -480,6 +482,7 @@ class Window(QMainWindow):
         self.badge.setText('●  '+state.upper())
         if state == 'Disconnected': self.compatible = False; self.poll.stop(); self.auto_detect.setChecked(False)
         if state == 'Disconnected':
+            if hasattr(self,'card_data'): self.card_data.reads.abort('Client disconnected. Capture is partial; remaining blocks were not read.')
             if hasattr(self,'emulation'):
                 self.emulation.invalidate('Disconnected: device memory is unverified. Press the PM3 button if simulation was running.')
             self.pending_info = None; self.info_verified_uid = None
@@ -516,7 +519,8 @@ class Window(QMainWindow):
 
     def workflow_busy(self):
         emulator = getattr(self,'emulation',None)
-        return bool(self.pending_info or self.pending_recovery or self.recovery_running or self.workflow_prompt or self.workflow_stage == 'identifying' or emulator and (emulator.pending or emulator.simulating))
+        reads = getattr(getattr(self,'card_data',None),'reads',None)
+        return bool(self.pending_info or self.pending_recovery or self.recovery_running or self.workflow_prompt or self.workflow_stage == 'identifying' or emulator and (emulator.pending or emulator.simulating) or reads and reads.pending)
 
     def set_workflow(self, stage, message, busy=False):
         self.workflow_stage = stage
@@ -562,7 +566,7 @@ class Window(QMainWindow):
         if not self.session.ready:
             self.statusBar().showMessage('Connect the reader and wait for the current operation to finish.'); return
         workflow_internal = internal and ((self.pending_info or self.pending_recovery) and line in {'hf 14a reader','hf mf info'} or self.workflow_stage == 'identifying' and line in {'lf search','hf search'})
-        if self.workflow_busy() and not workflow_internal and line not in {self.approved_recovery,self.approved_emulator}:
+        if self.workflow_busy() and not workflow_internal and line not in {self.approved_recovery,self.approved_emulator,self.approved_card_read}:
             self.statusBar().showMessage('Wait for the card workflow to finish, or stop it first.'); return
         try:
             if self.firmware.busy: raise ValueError('Wait for the firmware operation to finish.')
@@ -577,9 +581,11 @@ class Window(QMainWindow):
                 raise ValueError('Verify matching firmware and PM3 GENERIC hardware before device commands.')
             approved = line == self.approved_recovery and line.startswith('hf mf autopwn ')
             emulator_approved = line == self.approved_emulator
+            read_approved = line == self.approved_card_read and (line=='hf 14a reader' or line.startswith('hf mf rdbl '))
             self.approved_recovery = None
             self.approved_emulator = None
-            if confirm and not approved and not emulator_approved:
+            self.approved_card_read = None
+            if confirm and not approved and not emulator_approved and not read_approved:
                 answer = QMessageBox.question(self,'Confirm command','Review the exact command:\n\n'+line+'\n\nThis command has not been classified as read-only. It may modify a card, device, or files. Execute on your authorized target?',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
                 if answer != QMessageBox.Yes: return
             if not emulator_approved and (line.startswith(('hf mf e','hf mfu e','hf iclass e','hf mf sim','hf mf autopwn','hw reset')) or ' --emu' in line):
@@ -599,6 +605,7 @@ class Window(QMainWindow):
     def send_console(self): self.dispatch(self.history.currentText())
 
     def result(self,command,text):
+        if self.card_data.reads.completed(command,text): return
         self.emulation.completed(command,text)
         if command.startswith('hw '):
             self.hardware_output.appendPlainText('\n> '+command+'\n'+EventLogFormatter().feed(text+'\n'))
@@ -662,12 +669,20 @@ class Window(QMainWindow):
             self.pending_recovery = None
             self.approved_recovery = line
             self.recovery_running = True
+            self.card_data.recovery_results.setPlainText('Recovery running for UID '+card.uid+'. Sector key results will appear after the client returns its key table.')
             self.recovery_timeout_index = self.timeout.currentIndex()
             self.timeout.setCurrentIndex(2)
             self.recovery_status.setText('Auto Recovery running · 30-minute timeout · keep the same card on the antenna')
             self.set_workflow('recovering','Recovery in progress. Keep the same card still on the antenna.',True)
             self.dispatch(line)
         elif command.startswith('hf mf autopwn') and self.recovery_running:
+            card = self.recovery_card
+            if card:
+                sectors = recovery_sectors(text,card.size)
+                found = sum(row[label]['key'] is not None for row in sectors for label in ('A','B'))
+                lines = [f'UID: {card.uid} · Classic {card.size.upper()}\n{found}/{len(sectors)*2} keys explicitly reported found. This does not verify complete card data.\n']
+                lines += [f'Sector {row["sector"]:02d} | A: '+(row['A']['key'] or 'unknown')+' | B: '+(row['B']['key'] or 'unknown') for row in sectors]
+                self.card_data.recovery_results.setPlainText('\n'.join(lines))
             self.card_output.appendPlainText('\nAUTO RECOVERY RESULT\n'+EventLogFormatter().feed(text+'\n'))
             self.finish_recovery('Auto Recovery finished. Review the client output for recovered keys, partial results and saved dumps; completion alone is not proof of success.')
             if re.search(r'no tag|communication error|no usable key|no keys found|aborted|failed',text,re.I):
@@ -780,7 +795,7 @@ class Window(QMainWindow):
     def stop(self):
         if self.emulation.simulating and self.session.ready:
             self.emulation.stop_simulation(); return
-        if self.session.active and needs_confirmation(self.session.active):
+        if self.session.active and needs_confirmation(self.session.active) and not self.card_data.reads.pending:
             answer = QMessageBox.question(self,'Interrupt operation?','This command may modify the card or device. Interrupting it cannot undo changes already sent.\n\n'+self.session.active+'\n\nStop the client?',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
             if answer != QMessageBox.Yes: return
         self.queue.clear(); self.poll.stop(); self.auto_detect.setChecked(False); self.session.stop()
@@ -799,13 +814,14 @@ class Window(QMainWindow):
             event.ignore(); return
         if self.firmware.busy:
             QMessageBox.warning(self,'Firmware operation active','Wait for the firmware operation to finish before closing.'); event.ignore(); return
-        if self.session.active and needs_confirmation(self.session.active):
+        if self.session.active and needs_confirmation(self.session.active) and not self.card_data.reads.pending:
             answer = QMessageBox.question(self,'Close during operation?','Closing will interrupt '+self.session.active+'. Changes already sent cannot be undone. Close now?',QMessageBox.Yes|QMessageBox.No,QMessageBox.No)
             if answer != QMessageBox.Yes: event.ignore(); return
         self.poll.stop(); self.session.stopping = True; self.session.process.kill(); self.session.process.waitForFinished(2000)
         for handler in self.logger.handlers[:]:
             handler.close(); self.logger.removeHandler(handler)
         event.accept()
+        if hasattr(self,'card_data'): self.card_data.reads.abort('Window closed. Remaining blocks were not read.')
 
 if __name__ == '__main__':
     app = QApplication(sys.argv); app.setStyle('Fusion')

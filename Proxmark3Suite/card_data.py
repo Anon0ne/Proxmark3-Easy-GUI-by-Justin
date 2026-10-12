@@ -5,7 +5,7 @@ import re
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (QWidget,QVBoxLayout,QHBoxLayout,QLabel,QPushButton,QTreeWidget,
-    QTreeWidgetItem,QPlainTextEdit,QLineEdit,QFileDialog,QMessageBox,QSplitter,QHeaderView)
+    QTreeWidgetItem,QPlainTextEdit,QLineEdit,QFileDialog,QMessageBox,QSplitter,QHeaderView,QTabWidget)
 from emulation import inspect_dump,SIZES
 
 # NXP MF1S50YYX_V1 Rev 3.2, Tables 7 and 8. Entries indexed by C1 C2 C3.
@@ -92,7 +92,12 @@ class DumpDraft:
 class CardDataPanel(QWidget):
     def __init__(self,owner):
         super().__init__(); self.owner = owner; self.draft = None; self.comparison = None
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self); pages = QTabWidget(); outer.addWidget(pages)
+        editor = QWidget(); pages.addTab(editor,'Local dump editor'); layout = QVBoxLayout(editor)
+        from card_reads import CardReadPanel
+        self.reads = CardReadPanel(owner); pages.addTab(self.reads,'Read from card')
+        self.recovery_results = QPlainTextEdit(); self.recovery_results.setReadOnly(True)
+        self.recovery_results.setPlaceholderText('After a Classic recovery command, every sector and the keys explicitly reported by the client appear here. Unknown keys remain unknown.'); pages.addTab(self.recovery_results,'Recovery results')
         note = QLabel('Inspect and edit a local Classic dump. Edits stay in a draft until exported; original files are preserved. No device or card writes are performed here.')
         note.setWordWrap(True); layout.addWidget(note)
         actions = QHBoxLayout(); layout.addLayout(actions)

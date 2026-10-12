@@ -38,6 +38,25 @@ def recovery_command(card,commands):
         raise ValueError('Default dictionary is not documented by the selected client; use the workbench manually.')
     return 'hf mf autopwn '+size_flag+' --file mfc_default_keys'
 
+def recovery_sectors(text,size):
+    """Last firmware key table, retaining unknown sectors and result markers."""
+    count={'mini':5,'1k':16,'2k':32,'4k':40}.get(size)
+    if count is None: raise ValueError('Unsupported Classic size.')
+    rows={}; table=False
+    for raw in clean(text).splitlines():
+        line=re.sub(r'^\s*\[[^]]+\]\s*','',raw)
+        if re.search(r'Sec\s*\|\s*Blk\s*\|\s*key A\s*\|res\|\s*key B',line,re.I): rows={}; table=True; continue
+        if not table: continue
+        match=re.match(r'^\s*\|?\s*(\d+)\s*\|\s*(\d+)\s*\|\s*([0-9a-fA-F]{12}|-{12})\s*\|\s*([^|]*)\|\s*([0-9a-fA-F]{12}|-{12})\s*\|\s*([^|\r\n]*?)(?:\s*\||\s*$)',line)
+        if not match or not 0<=int(match[1])<count: continue
+        row={}
+        for label,key,marker in [('A',match[3],match[4]),('B',match[5],match[6])]:
+            marker=marker.strip()
+            known=bool(re.fullmatch('[0-9a-fA-F]{12}',key) and re.fullmatch('[1-9A-Za-z]',marker))
+            row[label]={'status':'reported found' if known else 'unknown','key':key.upper() if known else None,'marker':marker}
+        rows[int(match[1])]=row
+    return [{'sector':sector,**rows.get(sector,{label:{'status':'unknown','key':None,'marker':None} for label in ('A','B')})} for sector in range(count)]
+
 def card_summary(uid, observations):
     """Only explicitly reported card facts; never command chatter or guesses."""
     facts = {}

@@ -47,3 +47,7 @@ Pass criteria: task completion with documented evidence, zero silent data loss, 
 The audit found that malformed saved-card history could be silently discarded and replaced by a later observation. The source now preserves the unreadable file, retains new observations only in the current session, explains the problem, and blocks history persistence until repair. Two regression tests cover malformed JSON and invalid record schemas. This is an unreleased source fix; the published 0.6b assets and installed Desktop EXE do not yet include it.
 
 See [feature comparison](FEATURE_PARITY.md), [Future Features](FUTURE_FEATURES.md) and [verification record](VERIFICATION.md). Reference-project documentation was reviewed; their binaries were not benchmarked here.
+
+## 0.7 development work
+
+Guided selected-block reads and per-block double-read verification are now implemented in source, with partial/private reports and an all-block binary export gate. Per-sector recovery results are displayed from the actual client key-table format. These workflows have synthetic automated coverage and remain unverified on physical cards. Dictionary selection, per-sector credentials, shareable redacted reports and guarded physical writes remain core work. Published 0.6b assets are unchanged.

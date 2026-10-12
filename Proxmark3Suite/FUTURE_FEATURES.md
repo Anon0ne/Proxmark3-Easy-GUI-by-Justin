@@ -17,8 +17,8 @@ The High-priority items below are core completion work, not optional enhancement
 
 | Priority | Feature | User benefit and release requirement |
 | --- | --- | --- |
-| High | Guided selected-block reads | Choose sectors/blocks and supplied keys; show success, failure and unread blocks separately. Save completeness metadata rather than zero-filling unknown data and calling it recovered. |
-| High | Recovery results by sector | Display known Key A/Key B, unresolved sectors, saved files and actual recovery stage. Add dictionary selection only when supported by discovered help. Do not invent a percentage or ETA. |
+| High | Guided selected-block reads | 0.7 source implements selected blocks/ranges with one supplied key and double-read verification; physical validation and per-sector keys remain. Save completeness metadata rather than zero-filling unknown data and calling it recovered. |
+| High | Recovery results by sector | 0.7 source displays reported Key A/Key B and unknown sectors after recovery; live stage interpretation and dictionary selection remain. Add dictionary selection only when supported by discovered help. Do not invent a percentage or ETA. |
 | High | Guarded restore/write wizard | Inspect target type/generation, validate source/backup, show exact changed blocks, recheck identity, request explicit approval and verify readback. Trailer and manufacturer-block changes need separate review. |
 | High | Backup and operation reports | Keep provenance, firmware/client version, completeness, hashes and verification results. Export a shareable report with private data redacted by default. |
 | Medium | Type 2 / NDEF reader and editor | Decode Text/URI records and unknown record payloads; show capacity, lock/protection status. Begin read-only; later writes preserve unrelated TLVs and require backups and readback. |

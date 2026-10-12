@@ -103,6 +103,10 @@ See the [verification record](Proxmark3Suite/VERIFICATION.md), [release notes](R
 
 See [product readiness and completion gates](Proxmark3Suite/PRODUCT_READINESS.md) for the core gaps and verification needed before broader feature-parity claims. [Future Features](Proxmark3Suite/FUTURE_FEATURES.md) records researched additions and priorities, separately from shipped capabilities.
 
+## Development preview: 0.7-dev
+
+Current source adds **Card Data → Read from card**: supplied-key selected-block reads with UID checks and two matching reads per block. Partial captures remain JSON reports with explicit failed/unread blocks; only an all-block verified capture produces a binary data file. Trailer keys may still be masked. **Card Data → Recovery results** lists reported Key A/Key B results and unknown sectors after Classic recovery. These additions are not included in the published 0.6b binaries. See [guided read details](Proxmark3Suite/CARD_READS.md).
+
 ## For developers
 
 To build from source, open the `Proxmark3Suite` folder and run:

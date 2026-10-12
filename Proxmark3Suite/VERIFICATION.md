@@ -74,3 +74,7 @@ Linux verification: [build and installer run](https://github.com/Anon0ne/Proxmar
 ## Unreleased readiness hardening — October 12, 2026
 
 56 automated tests passed locally on Windows after adding two corrupted-history preservation regressions. No device commands were executed for this audit. The saved-history fix is in source after v0.6b; released binaries and the installed Desktop app are unchanged. Core gaps and comparative benchmark requirements are recorded in PRODUCT_READINESS.md.
+
+## 0.7-dev guided reads and recovery results — October 12, 2026
+
+65 automated tests passed locally on Windows. New cases cover read command metadata, selected ranges, response ambiguity/errors, approval cancellation, UID changes, two matching reads, mismatch rejection, workflow locks, cancellation, explicit partial reports, complete-capture binary export and final key-table parsing. Source startup self-test passed. Local RRG cmdhfmf.c/util.c verified the exact rdbl output and recovery table format. No physical guided reads, successful recovery or card writes were executed for this development preview. Published 0.6b assets and the installed Desktop EXE remain unchanged.
