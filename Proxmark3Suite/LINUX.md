@@ -1,6 +1,12 @@
 # Linux x86_64 beta
 
-Extract the tar.gz and run `./Proxmark3EasyGUI/Proxmark3Suite`. The executable bundles Python and Qt. It requires a Linux graphical desktop and system Qt/X11 libraries; Ubuntu 24.04 x86_64 is the build/test baseline. Other distributions and ARM are not verified.
+Extract the tar.gz and run `./Proxmark3EasyGUI/Proxmark3Suite`. The executable bundles Python and Qt. It requires a Linux graphical desktop and system OpenGL/X11 libraries; Ubuntu 24.04 x86_64 is the build/test baseline. Other distributions and ARM are not verified.
+
+On an Ubuntu desktop missing these runtime libraries, install them before launching:
+
+```sh
+sudo apt-get install libegl1 libopengl0 libxkbcommon0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-xkb1 libxkbcommon-x11-0
+```
 
 Optionally run `sh Proxmark3EasyGUI/install.sh` to copy the app into `~/.local/opt/Proxmark3EasyGUI` and add an application-menu launcher/icon. The optional installer uses system Python 3 to safely generate the launcher. No sudo is needed for this installer.
 

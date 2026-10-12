@@ -16,7 +16,9 @@ readme = """Proxmark3 Engineering Suite — 0.6b beta
    pm3.bat/client executable and COM port; then Connect & verify.
 4. Identify a card. Approve read-only information checks, then separately
    decide whether to attempt recovery.
-5. Use Emulation to save recovered dumps into PC slots, inspect or capture
+5. Open Card Data to inspect dumps, decode permissions, edit a local draft,
+   undo changes or compare files. Export a separate file; originals are preserved.
+6. Use Emulation to save recovered dumps into PC slots, inspect or capture
    device memory, and review loading or simulation separately.
 
 Defaults: C:\\rrg_other\\pm3.bat, COM18, PM3 GENERIC / Easy,

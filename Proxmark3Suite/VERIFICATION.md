@@ -1,4 +1,4 @@
-# Verification record — October 10, 2026
+# Verification record â€” October 10, 2026
 
 ## 0.5 development preview
 
@@ -10,7 +10,7 @@ The source GUI Emulation panel was also exercised against COM18: a device view m
 
 33 automated tests pass, including operation locking, reconnect during pending information checks, explicit workflow progress, no-card clearing without losing history, communication-failure results and harmless refusal of commands while the session is busy.
 
-Offscreen layouts were inspected at 1280×850 and 980×720. A clipping issue at the smaller size was fixed with a scrollable action panel and minimum button heights. Preview card data is synthetic.
+Offscreen layouts were inspected at 1280Ã—850 and 980Ã—720. A clipping issue at the smaller size was fixed with a scrollable action panel and minimum button heights. Preview card data is synthetic.
 
 The Windows ZIP was extracted into a separate local folder. Its per-user installer was exercised with a custom local destination and without a Desktop shortcut. The installed bundled EXE passed metadata startup: exit 0, 989 commands, no serial access. This does not verify clean-machine installation, default AppData installation, or physical recovery.
 
@@ -51,11 +51,22 @@ Read-only device transcript: `hardware-verification.txt`. GUI compatibility tran
 
 Event-log/Help update: 23 unit tests passed, including split ANSI chunks and carriage-return spinner output. Help topics are embedded in the EXE. Physical card backup: two independent authenticated 1024-byte dumps matched SHA256 e1f36e54d7e3b5226ab5b43814dbaddfefb5ab49c1762bbb04024df033738540. Magic backdoor backup failed twice; standard reads succeeded with retries. No lab writes performed.
 
-## 0.5b packaging verification � October 12, 2026
+## 0.5b packaging verification — October 12, 2026
 
-- 48 automated tests passed. Original SVG icon rendered to seven ICO sizes (16�256 px); Qt loaded the icon and PE inspection confirmed EXE icon resources.
+- 48 automated tests passed. Original SVG icon rendered to seven ICO sizes (16–256 px); Qt loaded the icon and PE inspection confirmed EXE icon resources.
 - Windows EXE built with PyInstaller 6.22.3 using the isolated build PATH. Metadata-only packaged startup exited 0 and discovered 989 commands from the installed target client. No serial access occurred in this release packaging check.
 - Inno Setup 6.7.3 compiler downloaded from its official release; Authenticode signature validated as Pyrsys B.V. The per-user Setup.exe compiled successfully and installed on this host with exit code 0.
 - Installed EXE hash matched the build. Installed startup exited 0 and discovered 989 commands. Desktop shortcut targets `%LOCALAPPDATA%\Programs\Proxmark3EasyGUI\Proxmark3Suite.exe` and uses its embedded icon. Windows uninstall registration was checked. This verifies installation on this existing development host, not on a clean machine.
 - Prior read-only hardware verification remains applicable to its documented scope. No card writes, physical recovery, emulator load/RF simulation or firmware flashing were performed for this packaging release.
 - Obsolete generated build directories were removed after installation verification. Private backups, card data, logs and the Marauder reference were preserved.
+
+## 0.6b release verification — October 12, 2026
+
+- 54 automated tests passed on Windows and Ubuntu 24.04 x86_64, including local drafts/undo, original-file preservation, BIN/DUMP/EML handling, access-bit decoding, large-sector mapping and Linux client/environment handling.
+- Card Data preview rendered and inspected at 1280x850 and 980x720 using synthetic data. Compact tables may elide hex text; selecting a row displays its complete block and a tooltip exposes spaced bytes.
+- Native Linux ELF build and packaged self-test passed in GitHub Actions: GUI startup, icon, Card Data tab and 989-command fixture. No serial access occurred. Linux per-user installer succeeded in an isolated HOME with spaces; the installed executable passed the self-test. Application-menu interaction and physical Linux hardware remain untested.
+- Windows Setup upgraded the existing per-user installation with exit code 0; installed EXE SHA256 matched the tested build. Desktop shortcut uses the installed EXE and embedded icon. Installed self-test passed, then actual installed-client metadata discovery passed with 989 commands and target revision, without serial access.
+- GUI firmware build/flashing remains Windows ProxSpace only and is disabled with an explanation on Linux. Both platforms require a compatible external client.
+- Reference GUI documentation was reviewed, not installed or hardware-tested. Future Features is a backlog, not a shipped-capability claim. No new card writes, physical recovery, device emulator loading/RF interaction or firmware flashing were performed.
+
+Linux verification: [build and installer run](https://github.com/Anon0ne/Proxmark3-Easy-GUI-by-Justin/actions/runs/38213148686). Linux distribution baseline is Ubuntu 24.04 x86_64; other distributions/architectures and clean-machine Windows setup remain unverified.
